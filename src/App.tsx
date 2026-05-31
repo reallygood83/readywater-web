@@ -36,6 +36,7 @@ const sortOptions: Array<{ value: SortOption; label: string }> = [
 ];
 
 const topicNeedRules: Array<{ pattern: RegExp; needs: string[] }> = [
+  { pattern: /어버이|카네이션|부모님|감사\s*카드|감사패|스승의날/, needs: ['어버이날 카네이션', '카네이션 만들기', '감사 카드 만들기', '카네이션 카드', '부모님 감사 선물'] },
   { pattern: /체육|운동|스포츠|놀이체육/, needs: ['피구공', '원마커', '팀조끼', '라바콘', '플라잉디스크'] },
   { pattern: /미술|만들기|공예/, needs: ['색종이', '클레이', '물감', '도화지', '공예 키트'] },
   { pattern: /과학|실험/, needs: ['실험 키트', '관찰', '자석', '전기 회로', '현미경'] },
@@ -108,6 +109,7 @@ function App() {
   const [grade, setGrade] = useState('6학년');
   const [purpose, setPurpose] = useState('체육교육');
   const [budget, setBudget] = useState(1_000_000);
+  const [participantCount, setParticipantCount] = useState<number | undefined>();
   const [source, setSource] = useState<MallSource>('all');
   const [sort, setSort] = useState<SortOption>('relevance');
   const [query, setQuery] = useState('');
@@ -240,6 +242,7 @@ function App() {
           purpose,
           grade,
           maxBudget: budget,
+          participantCount,
           itemCount: 12,
           source,
           needs: [query.trim() || [grade, purpose, '교구'].filter(Boolean).join(' '), ...seedNeeds],
@@ -285,6 +288,7 @@ function App() {
           grade?: string;
           purpose: string;
           maxBudget: number;
+          participantCount?: number;
           source: MallSource;
           sort: SortOption;
         };
@@ -297,6 +301,7 @@ function App() {
       setGrade(data.intent.grade || grade);
       setPurpose(data.intent.purpose);
       setBudget(data.intent.maxBudget);
+      setParticipantCount(data.intent.participantCount);
       setSource(data.intent.source);
       setSort(data.intent.sort);
       setQuery(data.query);

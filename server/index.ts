@@ -19,6 +19,7 @@ interface SearchOptions {
 }
 
 const topicNeedRules: Array<{ pattern: RegExp; purpose: string; needs: string[] }> = [
+  { pattern: /어버이|카네이션|부모님|감사\s*카드|감사패|스승의날/, purpose: '어버이날 기념 만들기', needs: ['어버이날 카네이션', '카네이션 만들기', '감사 카드 만들기', '카네이션 카드', '부모님 감사 선물', '꽃 만들기'] },
   { pattern: /체육|운동|스포츠|놀이체육/, purpose: '체육교육', needs: ['피구공', '원마커', '팀조끼', '라바콘', '플라잉디스크', '뉴스포츠'] },
   { pattern: /과학|실험/, purpose: '과학교육', needs: ['실험 키트', '관찰', '자석', '전기 회로', '현미경'] },
   { pattern: /미술|만들기|공예/, purpose: '미술교육', needs: ['색종이', '클레이', '물감', '도화지', '공예 키트', '마카펜', '스케치북'] },
@@ -61,6 +62,7 @@ interface ParsedPrompt {
   grade?: string;
   purpose: string;
   maxBudget: number;
+  participantCount?: number;
   source: MallSource;
   sort: SortOption;
   needs: string[];
@@ -72,6 +74,7 @@ interface GeminiIntentResponse {
   grade?: string;
   purpose?: string;
   maxBudget?: number;
+  participantCount?: number;
   source?: MallSource;
   sort?: SortOption;
   needs?: string[];
@@ -293,12 +296,22 @@ function productText(item: Product): string {
 }
 
 function meaningfulTokens(query: string): string[] {
-  const generic = new Set(['교구', '준비물', '수업', '학급', '초등', '유치원', '학교']);
+  const generic = new Set(['교구', '준비물', '수업', '학급', '초등', '유치원', '학교', '만들기', '재료', '기념', '학생', '힉생']);
   return normalize(query)
     .split(/\s+/)
     .filter(token => token.length > 1)
     .filter(token => !generic.has(token))
     .filter(token => !/^\d+학년$/.test(token));
+}
+
+function isEventMakingQuery(query: string): boolean {
+  return /어버이|카네이션|부모님|감사\s*카드|감사패|스승의날/.test(normalize(query));
+}
+
+function isEventMakingProduct(item: Product): boolean {
+  const text = productText(item);
+  if (/독도|지진|플로깅|추석|성찰|구구단|지리|흡연|금연/.test(text)) return false;
+  return /어버이|카네이션|부모님|감사\s*카드|감사패|꽃다발|코사지|브로치|카드\s*만들기|선물\s*바구니/.test(text);
 }
 
 function expandBroadQuery(query: string): string[] {
@@ -324,6 +337,7 @@ function parseNaturalPrompt(prompt: string): ParsedPrompt {
   const normalized = normalize(prompt);
   const gradeMatch = prompt.match(/(?:초등학교|초등)?\s*([1-6])\s*학년/);
   const budgetMatch = prompt.match(/(\d+(?:\.\d+)?)\s*(만원|천원|원)/);
+  const participantMatch = prompt.match(/(\d+)\s*(?:명|인|명\s*(?:학생|힉생)|(?:학생|힉생))/);
   const millionBudget = /100\s*만\s*원|백\s*만\s*원/.test(prompt);
   const source: MallSource = /아이스크림몰만|아이스크림만/.test(normalized)
     ? 'iscream'
@@ -357,6 +371,7 @@ function parseNaturalPrompt(prompt: string): ParsedPrompt {
     grade: gradeMatch ? `${gradeMatch[1]}학년` : undefined,
     purpose,
     maxBudget,
+    participantCount: participantMatch ? Number(participantMatch[1]) : undefined,
     source,
     sort,
     needs,
@@ -389,6 +404,7 @@ function toSortOption(value: unknown, fallback: SortOption): SortOption {
 function sanitizeGeminiIntent(raw: unknown, fallback: ParsedPrompt): ParsedPrompt {
   const data = (raw && typeof raw === 'object' ? raw : {}) as GeminiIntentResponse;
   const maxBudget = Number(data.maxBudget);
+  const participantCount = Number(data.participantCount);
   const needs = Array.isArray(data.needs)
     ? data.needs.map(item => String(item).trim()).filter(Boolean).slice(0, 10)
     : fallback.needs;
@@ -397,6 +413,7 @@ function sanitizeGeminiIntent(raw: unknown, fallback: ParsedPrompt): ParsedPromp
     grade: data.grade ? String(data.grade).trim() : fallback.grade,
     purpose: data.purpose ? String(data.purpose).trim().slice(0, 40) : fallback.purpose,
     maxBudget: Number.isFinite(maxBudget) && maxBudget >= 1000 ? maxBudget : fallback.maxBudget,
+    participantCount: Number.isFinite(participantCount) && participantCount > 0 ? Math.floor(participantCount) : fallback.participantCount,
     source: toMallSource(data.source, fallback.source),
     sort: toSortOption(data.sort, fallback.sort),
     needs: needs.length > 0 ? needs : fallback.needs,
@@ -419,6 +436,7 @@ function strengthenIntent(intent: ParsedPrompt, prompt: string): ParsedPrompt {
 
 function categoryForProduct(item: Product): string {
   const text = productText(item);
+  if (/어버이|카네이션|부모님|감사\s*카드|감사패|코사지|브로치/.test(text)) return '행사카드';
   if (/색종이|종이접기|도화지|한지|습자지|스케치북|캔버스/.test(text)) return '종이도화';
   if (/물감|마카|마커펜|싸인펜|사인펜|색연필|크레파스|붓|파스텔/.test(text)) return '채색도구';
   if (/클레이|점토|공예|만들기|꾸미기|비즈|폼폼|스티커/.test(text)) return '공예만들기';
@@ -440,6 +458,7 @@ function popularitySignal(item: Product): number {
 
 function valueScore(item: Product, query: string): number {
   const categoryBoost: Record<string, number> = {
+    행사카드: 48,
     종이도화: 36,
     채색도구: 35,
     공예만들기: 34,
@@ -466,6 +485,7 @@ async function parsePromptWithGemini(prompt: string, fallback: ParsedPrompt): Pr
           'source는 all, teachermall, iscream 중 하나다.',
           'sort는 relevance, price_low, price_high, popular, newest 중 하나다.',
           'maxBudget은 원 단위 숫자다.',
+          'participantCount는 학생 수나 구입 대상 인원 수다. 예: 22명 학생이면 22.',
           'needs는 쇼핑몰 검색에 직접 쓸 구체 키워드 배열이다.',
           '응답은 마크다운 없이 JSON 객체 하나만 반환한다.',
         ].join('\n'),
@@ -482,6 +502,7 @@ async function parsePromptWithGemini(prompt: string, fallback: ParsedPrompt): Pr
           '  "grade": "6학년",',
           '  "purpose": "체육교육",',
           '  "maxBudget": 1000000,',
+          '  "participantCount": 25,',
           '  "source": "all",',
           '  "sort": "popular",',
           '  "needs": ["피구공", "원마커"],',
@@ -769,7 +790,11 @@ async function searchProducts(query: string, options: SearchOptions): Promise<Pr
 
   const merged = (await Promise.all(jobs)).flat();
   const scoped = isSportsQuery(query) ? merged.filter(isSportsProduct) : merged;
-  const deduped = Array.from(new Map(scoped.map(item => [`${item.mall}:${item.goods_seq}`, item])).values());
+  const eventScoped = isEventMakingQuery(query)
+    ? scoped.filter(isEventMakingProduct)
+    : scoped;
+  const effective = eventScoped.length > 0 ? eventScoped : scoped;
+  const deduped = Array.from(new Map(effective.map(item => [`${item.mall}:${item.goods_seq}`, item])).values());
   const sorted = sortProducts(deduped, sort, query);
   return source === 'all' ? balancedMallResults(sorted, limit) : sorted.slice(0, limit);
 }
@@ -825,6 +850,7 @@ async function buildBudgetKit(params: {
   purpose: string;
   grade?: string;
   maxBudget: number;
+  participantCount?: number;
   itemCount: number;
   source: MallSource;
   needs?: string[];
@@ -866,7 +892,7 @@ async function buildBudgetKit(params: {
 
   const lines: BudgetLine[] = [];
   let totalCost = 0;
-  const categoryTargets = ['종이도화', '채색도구', '공예만들기', '구기던지기', '공간표시', '팀구분', '뉴스포츠', '안전운영', '기타'];
+  const categoryTargets = ['행사카드', '종이도화', '채색도구', '공예만들기', '구기던지기', '공간표시', '팀구분', '뉴스포츠', '안전운영', '기타'];
   const orderedCandidates = [
     ...categoryTargets.flatMap(category => unique.filter(item => categoryForProduct(item) === category).slice(0, 2)),
     ...unique,
@@ -878,15 +904,17 @@ async function buildBudgetKit(params: {
     const remaining = params.maxBudget - totalCost;
     if (item.price > remaining) continue;
     const category = categoryForProduct(item);
-    const targetQuantity = category === '팀구분'
-      ? Math.min(30, Math.max(10, Math.floor(params.maxBudget / Math.max(item.price, 1) / 20)))
-      : category === '공간표시'
-        ? Math.min(24, item.price < 3000 ? 20 : 4)
-        : category === '구기던지기'
-          ? item.price < 4000 ? 12 : item.price < 20000 ? 6 : 3
-          : category === '뉴스포츠'
-            ? item.price < 12000 ? 8 : item.price < 40000 ? 4 : 1
-            : item.price < 5000 ? 3 : 1;
+    const targetQuantity = targetQuantityFor(item, category, {
+      purpose: params.purpose,
+      grade: params.grade,
+      maxBudget: params.maxBudget,
+      participantCount: params.participantCount,
+      source: params.source,
+      sort: 'relevance',
+      needs: baseNeeds,
+      shouldBuildBudget: true,
+      shouldCompare: false,
+    });
     const quantity = Math.max(1, Math.min(targetQuantity, Math.floor(remaining / item.price)));
     const lineCost = item.price * quantity;
     if (lineCost <= remaining) {
@@ -936,14 +964,19 @@ function sanitizeRecommendation(raw: unknown, candidates: Product[], prompt: str
     const key = mall && choice.goods_seq ? `${mall}:${choice.goods_seq}` : '';
     const item = candidateMap.get(key);
     if (!item || selected.some(line => candidateKey(line) === key)) continue;
-    const quantity = Math.max(1, Math.min(40, Math.floor(Number(choice.quantity) || 1)));
+    const category = choice.category || categoryForProduct(item);
+    const requestedQuantity = Math.max(1, Math.floor(Number(choice.quantity) || 1));
+    const targetQuantity = isEventMakingQuery(`${intent.purpose} ${intent.needs.join(' ')}`)
+      ? Math.max(requestedQuantity, targetQuantityFor(item, category, intent))
+      : requestedQuantity;
+    const quantity = Math.max(1, Math.min(60, targetQuantity));
     const affordableQuantity = Math.min(quantity, Math.floor((intent.maxBudget - totalCost) / item.price));
     if (affordableQuantity <= 0) continue;
     totalCost += item.price * affordableQuantity;
     selected.push({
       ...item,
       quantity: affordableQuantity,
-      category: choice.category || categoryForProduct(item),
+      category,
       reason: String(choice.reason || '').trim() || '수업 목적과 예산 조건에 맞는 후보입니다.',
       activities: Array.isArray(choice.activities) ? choice.activities.map(String).filter(Boolean).slice(0, 4) : [],
       risks: Array.isArray(choice.risks) ? choice.risks.map(String).filter(Boolean).slice(0, 3) : [],
@@ -984,6 +1017,7 @@ function sanitizeRecommendation(raw: unknown, candidates: Product[], prompt: str
 
 function maxUsefulQuantity(item: BudgetLine): number {
   const category = item.category || categoryForProduct(item);
+  if (category === '행사카드') return item.price < 2000 ? 60 : item.price < 5000 ? 35 : 20;
   if (category === '종이도화') return item.price < 3000 ? 60 : item.price < 10000 ? 20 : 8;
   if (category === '채색도구') return item.price < 3000 ? 40 : item.price < 15000 ? 12 : 4;
   if (category === '공예만들기') return item.price < 5000 ? 30 : item.price < 20000 ? 10 : 4;
@@ -995,6 +1029,25 @@ function maxUsefulQuantity(item: BudgetLine): number {
   return 3;
 }
 
+function targetQuantityFor(item: Product, category: string, intent: ParsedPrompt): number {
+  const participantCount = intent.participantCount || 0;
+  if (participantCount > 0 && /행사카드|공예만들기|종이도화|채색도구/.test(category)) {
+    const perStudentTarget = category === '행사카드' || category === '공예만들기'
+      ? participantCount
+      : Math.ceil(participantCount / 2);
+    return Math.min(Math.max(perStudentTarget, 1), maxUsefulQuantity({ ...item, quantity: 1, useCase: '', category }));
+  }
+  if (category === '팀구분') return 20;
+  if (category === '공간표시') return item.price < 3000 ? 20 : 4;
+  if (category === '구기던지기') return item.price < 12000 ? 8 : 4;
+  if (category === '뉴스포츠') return item.price < 15000 ? 6 : 2;
+  if (category === '종이도화') return item.price < 3000 ? 30 : 8;
+  if (category === '채색도구') return item.price < 3000 ? 24 : 6;
+  if (category === '공예만들기') return item.price < 5000 ? 20 : 5;
+  if (category === '행사카드') return item.price < 3000 ? 24 : 8;
+  return item.price < 5000 ? 3 : 1;
+}
+
 function recalculateRecommendation(rec: RecommendationResponse, budget: number): RecommendationResponse {
   const totalCost = rec.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   return { ...rec, totalCost, remaining: budget - totalCost };
@@ -1002,7 +1055,9 @@ function recalculateRecommendation(rec: RecommendationResponse, budget: number):
 
 function fillRecommendationBudget(rec: RecommendationResponse, candidates: Product[], intent: ParsedPrompt): RecommendationResponse {
   const selectedKeys = new Set(rec.items.map(candidateKey));
-  const wantedCategories = ['공간표시', '팀구분', '구기던지기', '뉴스포츠', '안전운영'];
+  const wantedCategories = isEventMakingQuery(`${intent.purpose} ${intent.needs.join(' ')}`)
+    ? ['행사카드', '공예만들기', '종이도화', '채색도구', '기타']
+    : ['공간표시', '팀구분', '구기던지기', '뉴스포츠', '안전운영'];
   let next = recalculateRecommendation(rec, intent.maxBudget);
 
   for (const category of wantedCategories) {
@@ -1015,7 +1070,7 @@ function fillRecommendationBudget(rec: RecommendationResponse, candidates: Produ
       .find(item => item.price <= next.remaining);
     if (!candidate) continue;
     const quantity = Math.max(1, Math.min(
-      maxUsefulQuantity({ ...candidate, quantity: 1, useCase: '', category }),
+      targetQuantityFor(candidate, category, intent),
       Math.floor(next.remaining / candidate.price),
     ));
     if (quantity <= 0) continue;
@@ -1074,7 +1129,10 @@ function fallbackRecommendation(candidates: Product[], intent: ParsedPrompt): Re
     grouped.set(category, [...(grouped.get(category) || []), item]);
   }
 
-  const ordered = ['구기던지기', '공간표시', '팀구분', '뉴스포츠', '안전운영', '기타']
+  const orderedCategories = isEventMakingQuery(`${intent.purpose} ${intent.needs.join(' ')}`)
+    ? ['행사카드', '공예만들기', '종이도화', '채색도구', '기타']
+    : ['구기던지기', '공간표시', '팀구분', '뉴스포츠', '안전운영', '기타'];
+  const ordered = orderedCategories
     .flatMap(category => (grouped.get(category) || []).slice(0, category === '기타' ? 2 : 3));
   const selected: BudgetLine[] = [];
   let totalCost = 0;
@@ -1082,15 +1140,7 @@ function fallbackRecommendation(candidates: Product[], intent: ParsedPrompt): Re
   for (const item of ordered) {
     if (selected.length >= 10 || selected.some(line => candidateKey(line) === candidateKey(item))) continue;
     const category = categoryForProduct(item);
-    const targetQuantity = category === '팀구분'
-      ? 20
-      : category === '공간표시'
-        ? item.price < 3000 ? 20 : 4
-        : category === '구기던지기'
-          ? item.price < 12000 ? 8 : 4
-          : category === '뉴스포츠'
-            ? item.price < 15000 ? 6 : 2
-            : 1;
+    const targetQuantity = targetQuantityFor(item, category, intent);
     const quantity = Math.min(targetQuantity, Math.floor((intent.maxBudget - totalCost) / item.price));
     if (quantity <= 0) continue;
     totalCost += item.price * quantity;
@@ -1214,6 +1264,17 @@ function uniqueTextList(items: string[]): string[] {
     seen.add(normalized);
     return [item];
   });
+}
+
+function filterIntentCandidates(candidates: Product[], intent: ParsedPrompt): Product[] {
+  const intentText = `${intent.purpose} ${intent.needs.join(' ')}`;
+  if (!isEventMakingQuery(intentText)) return candidates;
+  const eventMatches = candidates.filter(isEventMakingProduct);
+  if (eventMatches.length === 0) return candidates;
+  if (!intent.participantCount || intent.participantCount <= 0) return eventMatches;
+  const perStudentBudget = intent.maxBudget / intent.participantCount;
+  const perStudentMatches = eventMatches.filter(item => item.price <= perStudentBudget * 1.15);
+  return perStudentMatches.length >= 3 ? perStudentMatches : eventMatches;
 }
 
 function sanitizeClientProducts(value: unknown): Product[] {
@@ -1453,7 +1514,8 @@ app.post('/api/intent', async (req, res) => {
         maxExpandedQueries: intentExpandedQueryLimit,
       })),
     )).flat();
-    const items = Array.from(new Map(candidates.map(item => [candidateKey(item), item])).values()).slice(0, intentCandidateLimit);
+    const uniqueCandidates = Array.from(new Map(candidates.map(item => [candidateKey(item), item])).values());
+    const items = filterIntentCandidates(uniqueCandidates, intent).slice(0, intentCandidateLimit);
     const recommendation = intent.shouldBuildBudget
       ? await recommendWithGemini(prompt, intent, items)
       : null;
@@ -1500,8 +1562,9 @@ app.post('/api/recommend', async (req, res) => {
       })),
     )).flat();
     const uniqueCandidates = Array.from(new Map(candidates.map(item => [candidateKey(item), item])).values());
-    const recommendation = await recommendWithGemini(prompt, intent, uniqueCandidates);
-    res.json({ prompt, intent, query, searchNeeds, candidates: uniqueCandidates.slice(0, 30), recommendation });
+    const filteredCandidates = filterIntentCandidates(uniqueCandidates, intent);
+    const recommendation = await recommendWithGemini(prompt, intent, filteredCandidates);
+    res.json({ prompt, intent, query, searchNeeds, candidates: filteredCandidates.slice(0, 30), recommendation });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -1515,6 +1578,7 @@ app.post('/api/budget-kit', async (req, res) => {
       purpose,
       grade: req.body.grade ? String(req.body.grade) : undefined,
       maxBudget: numberParam(req.body.maxBudget, 1_000_000),
+      participantCount: req.body.participantCount ? numberParam(req.body.participantCount, 0) : undefined,
       itemCount: numberParam(req.body.itemCount, 10),
       source: (req.body.source as MallSource) || 'all',
       needs: Array.isArray(req.body.needs) ? req.body.needs.map(String).filter(Boolean) : undefined,
