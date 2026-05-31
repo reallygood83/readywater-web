@@ -427,7 +427,7 @@ function App() {
             <ShoppingCart size={16} /> 예산구성
           </button>
         </nav>
-        {authEnabled ? (
+        {authEnabled && authenticated ? (
           <button className="logout-button" onClick={() => void logout()}>
             <LogOut size={15} />
             로그아웃
