@@ -1,7 +1,8 @@
 import express from 'express';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import ExcelJS from 'exceljs';
 
 type MallSource = 'all' | 'teachermall' | 'iscream';
@@ -139,8 +140,10 @@ const PORT = Number(process.env.PORT || 5191);
 const geminiApiKey = process.env.GEMINI_API_KEY || '';
 const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const appPassword = process.env.READYWATER_PASSWORD || '';
-const sessionSecret = process.env.READYWATER_SESSION_SECRET || randomBytes(32).toString('hex');
-const estimateTemplatePath = '/Users/moon/Downloads/에듀파인_견적양식_20260531.xlsx';
+const sessionSecret = process.env.READYWATER_SESSION_SECRET || (process.env.VERCEL ? hashSeed(appPassword) : randomBytes(32).toString('hex'));
+const serverDir = dirname(fileURLToPath(import.meta.url));
+const estimateTemplatePath = process.env.ESTIMATE_TEMPLATE_PATH || resolve(serverDir, 'templates/edufine-estimate-template.xlsx');
+const isHosted = Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -160,6 +163,10 @@ const sessionTtlMs = 1000 * 60 * 60 * 12;
 
 function hashText(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function hashSeed(value: string): string {
+  return hashText(value || 'readywater-session-fallback');
 }
 
 function safeEqualText(left: string, right: string): boolean {
@@ -198,13 +205,15 @@ function isValidSession(cookieHeader?: string): boolean {
 }
 
 function sessionCookie(token: string): string {
-  return [
+  const parts = [
     `readywater_session=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
     'SameSite=Lax',
     `Max-Age=${Math.floor(sessionTtlMs / 1000)}`,
-  ].join('; ');
+  ];
+  if (isHosted) parts.push('Secure');
+  return parts.join('; ');
 }
 
 function cacheGet<T>(key: string): T | null {
@@ -1344,6 +1353,10 @@ app.post('/api/export/estimate.xlsx', async (req, res) => {
   }
 });
 
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`Readywater API listening on http://127.0.0.1:${PORT}`);
-});
+export default app;
+
+if (!process.env.VERCEL) {
+  app.listen(PORT, '127.0.0.1', () => {
+    console.log(`Readywater API listening on http://127.0.0.1:${PORT}`);
+  });
+}

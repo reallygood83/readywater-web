@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Readywater">
+  <defs>
+    <linearGradient id="g" x1="10" y1="6" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0e9f8f"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#g)"/>
+  <path d="M32 11c5 9 14 18 14 28a14 14 0 0 1-28 0c0-10 9-19 14-28Z" fill="#fff" opacity=".95"/>
+  <path d="M23 36c7 1 13-1 18-7" fill="none" stroke="#0e9f8f" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="40" cy="23" r="4" fill="#fff"/>
+</svg>

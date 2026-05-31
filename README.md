@@ -27,6 +27,8 @@ npm run dev
 
 Set `READYWATER_PASSWORD` in `.env` to require a password before users can search or use AI/export APIs. Keep `GEMINI_API_KEY`, `READYWATER_PASSWORD`, and `READYWATER_SESSION_SECRET` out of GitHub.
 
+`ESTIMATE_TEMPLATE_PATH` is optional. If it is empty, the server uses the bundled `server/templates/edufine-estimate-template.xlsx`, which keeps Excel estimate export working on Vercel.
+
 Open:
 
 ```text
@@ -82,9 +84,13 @@ The current app exports Markdown, CSV, and Edufine-ready Excel estimates. The in
 
 ## Deployment Direction
 
-The current local architecture is Vite plus an Express API. For hosted use:
+The app is Vercel-ready as a Vite static frontend plus a Node.js Function that reuses the Express API:
 
-- Vercel: move the Express API into a Vercel Node.js Function or split endpoints under `api/`, then set `GEMINI_API_KEY`, `READYWATER_PASSWORD`, and `READYWATER_SESSION_SECRET` as Vercel environment variables.
+- Vercel: `api/index.ts` exports the Express app, `vercel.json` rewrites `/api/*` to that function and all other paths to the Vite SPA.
+- Required Vercel environment variables: `GEMINI_API_KEY`, `GEMINI_MODEL`, `READYWATER_PASSWORD`, `READYWATER_SESSION_SECRET`.
+- Optional Vercel environment variable: `ESTIMATE_TEMPLATE_PATH`, only needed if you want to override the bundled Edufine template.
+- Set `READYWATER_PASSWORD` in Vercel before sharing the deployment URL. Without it, the app intentionally runs without the password gate for local no-auth development.
+- Before production launch, run `vercel login`, `vercel pull --yes --environment preview`, and `vercel build --yes`, then verify `/api/auth/status`, `/api/search`, `/api/export/estimate.csv`, `/api/export/estimate.xlsx`, and one non-root frontend route.
 - Firebase: use Firebase Hosting for the web UI and Cloud Functions for the Express API.
 - Firestore: use it for user accounts, password/member records, search logs, usage metering, saved carts, and subscription state. It is not a replacement for the server API that protects the Gemini key.
 
