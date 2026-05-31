@@ -6,12 +6,13 @@ import {
   ExternalLink,
   FileText,
   Loader2,
+  ShieldCheck,
   Search,
   Settings2,
   ShoppingCart,
   Sparkles,
 } from 'lucide-react';
-import type { BudgetKitResponse, BudgetLine, MallSource, Product, SortOption } from './types';
+import type { BudgetKitResponse, BudgetLine, MallSource, Product, RecommendationResponse, SortOption } from './types';
 
 const formatWon = (value: number) => `${value.toLocaleString('ko-KR')}원`;
 
@@ -54,6 +55,7 @@ function App() {
   const [query, setQuery] = useState('6학년 체육 교구');
   const [results, setResults] = useState<Product[]>([]);
   const [kit, setKit] = useState<BudgetKitResponse | null>(null);
+  const [recommendation, setRecommendation] = useState<RecommendationResponse | null>(null);
   const [selected, setSelected] = useState<BudgetLine[]>([]);
   const [naturalPrompt, setNaturalPrompt] = useState('6학년 체육교육에 100만원 예산으로 반응 좋은 교구를 추천하고 구매 링크까지 알려줘');
   const [loading, setLoading] = useState(false);
@@ -110,6 +112,7 @@ function App() {
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json() as BudgetKitResponse;
       setKit(data);
+      setRecommendation(null);
       setSelected(data.items);
       setResults(data.allCandidates);
       setStatus(`예산안 ${formatWon(data.totalCost)}을 구성했습니다. 남은 예산은 ${formatWon(data.remaining)}입니다.`);
@@ -142,6 +145,7 @@ function App() {
         query: string;
         items: Product[];
         budgetKit: BudgetKitResponse | null;
+        recommendation: RecommendationResponse | null;
       };
 
       setGrade(data.intent.grade || grade);
@@ -151,11 +155,12 @@ function App() {
       setSort(data.intent.sort);
       setQuery(data.query);
       setResults(data.items);
+      setRecommendation(data.recommendation);
       if (data.budgetKit) {
         setKit(data.budgetKit);
         setSelected(data.budgetKit.items);
         setActiveTab('budget');
-        setStatus(`${data.parser === 'gemini' ? 'Gemini AI' : '룰 기반'}로 요청을 해석해 ${formatWon(data.budgetKit.totalCost)} 예산안을 만들었습니다.`);
+        setStatus(`${data.recommendation?.parser === 'gemini' ? 'Gemini AI' : data.parser === 'gemini' ? 'Gemini AI + 룰 보정' : '룰 기반'}로 실제 후보 상품만 검증해 ${formatWon(data.budgetKit.totalCost)} 추천안을 만들었습니다.`);
       } else {
         setActiveTab('search');
         setStatus(`${data.parser === 'gemini' ? 'Gemini AI' : '룰 기반'}로 요청을 해석해 ${data.items.length}개 상품을 찾았습니다.`);
@@ -190,20 +195,28 @@ function App() {
       `- 예산: ${formatWon(budget)}`,
       `- 구성 총액: ${formatWon(totals.selectedTotal)}`,
       `- 남은 예산: ${formatWon(totals.remaining)}`,
+      recommendation ? `- 추천 요약: ${recommendation.summary}` : '',
+      recommendation ? `- 구성 전략: ${recommendation.strategy}` : '',
       '',
       '## 구매 목록',
       '',
       ...selected.map((item, index) => [
         `### ${index + 1}. ${item.goods_name}`,
         `- 몰: ${item.mall_name}`,
+        item.category ? `- 영역: ${item.category}` : '',
         `- 단가: ${formatWon(item.price)}`,
         `- 수량: ${item.quantity}`,
         `- 소계: ${formatWon(item.price * item.quantity)}`,
+        item.reason ? `- 선정 이유: ${item.reason}` : '',
         `- 활용: ${item.useCase}`,
+        item.activities?.length ? `- 활동 예시: ${item.activities.join(', ')}` : '',
+        item.risks?.length ? `- 확인 사항: ${item.risks.join(', ')}` : '',
         `- 구매 링크: ${item.shop_url}`,
         '',
-      ].join('\n')),
-    ];
+      ].filter(Boolean).join('\n')),
+      recommendation?.rejected.length ? '## 제외한 후보' : '',
+      ...(recommendation?.rejected.map(item => `- ${item.goods_name}: ${item.reason}`) || []),
+    ].filter(Boolean);
     const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -342,6 +355,33 @@ function App() {
             </div>
           </div>
 
+          {recommendation ? (
+            <section className="recommendation-panel" aria-label="AI 추천 요약">
+              <div className="recommendation-title">
+                <div>
+                  <Sparkles size={18} />
+                  <span>{recommendation.parser === 'gemini' ? 'Gemini 큐레이션' : '규칙 기반 큐레이션'}</span>
+                </div>
+                <strong>{formatWon(recommendation.totalCost)} / {formatWon(budget)}</strong>
+              </div>
+              <p className="recommendation-summary">{recommendation.summary}</p>
+              <p className="recommendation-strategy">{recommendation.strategy}</p>
+              <div className="coverage-list">
+                {recommendation.coverage.map(item => <span key={item}>{item}</span>)}
+              </div>
+              {recommendation.rejected.length ? (
+                <details className="rejected-list">
+                  <summary>제외한 후보 {recommendation.rejected.length}개 보기</summary>
+                  {recommendation.rejected.map(item => (
+                    <p key={`${item.mall}:${item.goods_seq}`}>
+                      <strong>{item.goods_name}</strong> - {item.reason}
+                    </p>
+                  ))}
+                </details>
+              ) : null}
+            </section>
+          ) : null}
+
           <div className="product-grid">
             {results.map(product => (
               <article className="product-card" key={`${product.mall}:${product.goods_seq}`}>
@@ -390,7 +430,10 @@ function App() {
                 <div>
                   <span className={`mall-dot ${mallClass(line.mall)}`} />
                   <strong>{line.goods_name}</strong>
+                  {line.reason ? <p className="line-reason"><ShieldCheck size={13} /> {line.reason}</p> : null}
                   <p>{line.useCase}</p>
+                  {line.activities?.length ? <p>활동: {line.activities.slice(0, 2).join(' · ')}</p> : null}
+                  {line.risks?.length ? <p>확인: {line.risks.join(' · ')}</p> : null}
                 </div>
                 <div className="qty-row">
                   <button onClick={() => updateQuantity(line, line.quantity - 1)}>-</button>

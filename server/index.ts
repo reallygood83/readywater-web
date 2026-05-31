@@ -39,6 +39,10 @@ interface Product {
 interface BudgetLine extends Product {
   quantity: number;
   useCase: string;
+  reason?: string;
+  activities?: string[];
+  risks?: string[];
+  category?: string;
 }
 
 interface ParsedPrompt {
@@ -61,6 +65,42 @@ interface GeminiIntentResponse {
   needs?: string[];
   shouldBuildBudget?: boolean;
   shouldCompare?: boolean;
+}
+
+interface RecommendationResponse {
+  parser: 'gemini' | 'rules';
+  summary: string;
+  strategy: string;
+  items: BudgetLine[];
+  rejected: Array<{
+    goods_seq: string;
+    mall: Product['mall'];
+    goods_name: string;
+    reason: string;
+  }>;
+  coverage: string[];
+  totalCost: number;
+  remaining: number;
+}
+
+interface GeminiRecommendationResponse {
+  summary?: string;
+  strategy?: string;
+  selected?: Array<{
+    mall?: Product['mall'];
+    goods_seq?: string;
+    quantity?: number;
+    reason?: string;
+    activities?: string[];
+    risks?: string[];
+    category?: string;
+  }>;
+  rejected?: Array<{
+    mall?: Product['mall'];
+    goods_seq?: string;
+    reason?: string;
+  }>;
+  coverage?: string[];
 }
 
 function loadEnvFiles(): void {
@@ -123,6 +163,13 @@ function parseNumber(value: unknown): number {
   return cleaned ? Number(cleaned) || 0 : 0;
 }
 
+function normalizePurchaseCount(value: unknown): number | undefined {
+  const parsed = parseNumber(value);
+  if (!parsed) return undefined;
+  if (parsed > 100_000) return 5000;
+  return parsed;
+}
+
 function normalize(text: string): string {
   return text.toLowerCase().replace(/[()[\]{}'"“”‘’]/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -161,7 +208,9 @@ function isSportsQuery(query: string): boolean {
 }
 
 function isSportsProduct(item: Product): boolean {
-  return /체육|운동|스포츠|피구|공\b|원마커|마커|팀조끼|조끼|라바콘|삼각콘|고깔|플라잉디스크|디스크|뉴스포츠|구기|놀이체육/.test(productText(item));
+  const text = productText(item);
+  if (/구명조끼|수영조끼|부력|팝업북|스티커|도서|dvd|금연|흡연|만들기|공책|노트/.test(text)) return false;
+  return /체육|운동|스포츠|피구|원마커|마킹콘|팀조끼|띠조끼|게임용 조끼|라바콘|삼각콘|고깔|플라잉디스크|디스크|뉴스포츠|구기|놀이체육|빈백|피클볼|스파이크볼|배드민턴|민턴|호루라기|줄넘기/.test(text);
 }
 
 function parseNaturalPrompt(prompt: string): ParsedPrompt {
@@ -256,6 +305,48 @@ function sanitizeGeminiIntent(raw: unknown, fallback: ParsedPrompt): ParsedPromp
   };
 }
 
+function strengthenIntent(intent: ParsedPrompt, prompt: string): ParsedPrompt {
+  const sportsDefaults = ['피구공', '원마커', '팀조끼', '라바콘', '플라잉디스크', '뉴스포츠', '호루라기'];
+  const isSports = /체육|운동|스포츠|놀이체육/.test(normalize(`${prompt} ${intent.purpose} ${intent.needs.join(' ')}`));
+  if (!isSports) return intent;
+
+  return {
+    ...intent,
+    needs: [...new Set([...intent.needs, ...sportsDefaults])],
+    shouldBuildBudget: intent.shouldBuildBudget || /예산|구입|구매|리스트|리스트업|추천|구성/.test(normalize(prompt)),
+  };
+}
+
+function categoryForProduct(item: Product): string {
+  const text = productText(item);
+  if (/팀조끼|띠조끼|게임용 조끼/.test(text)) return '팀구분';
+  if (/콘|마커|라바콘|삼각콘|고깔/.test(text)) return '공간표시';
+  if (/호루라기|펌프|타이머|스코어|점수|안전/.test(text)) return '안전운영';
+  if (/스파이크볼|피클볼|라켓|민턴|인디아카|플라잉디스크|디스크|뉴스포츠/.test(text)) return '뉴스포츠';
+  if (/피구|축구|농구|배구|공\b|볼\b|빈백|콩주머니/.test(text)) return '구기던지기';
+  return '기타';
+}
+
+function popularitySignal(item: Product): number {
+  const purchase = Math.min(item.purchase_count || 0, 5000);
+  const wish = Math.min(item.wish_count || 0, 500);
+  const review = Math.min(item.review_count || 0, 300);
+  const rating = item.average_rating ? Math.min(item.average_rating, 5) * 30 : 0;
+  return purchase * 0.15 + wish * 1.2 + review * 8 + rating;
+}
+
+function valueScore(item: Product, query: string): number {
+  const categoryBoost: Record<string, number> = {
+    구기던지기: 35,
+    공간표시: 34,
+    팀구분: 32,
+    뉴스포츠: 30,
+    안전운영: 24,
+    기타: 0,
+  };
+  return keywordScore(item, query) + popularitySignal(item) + (categoryBoost[categoryForProduct(item)] || 0);
+}
+
 async function parsePromptWithGemini(prompt: string, fallback: ParsedPrompt): Promise<ParsedPrompt | null> {
   if (!geminiApiKey) return null;
 
@@ -336,7 +427,7 @@ function keywordScore(item: Product, query: string): number {
     else if (haystack.includes(token)) score += 35;
   }
 
-  score += Math.min(item.purchase_count || 0, 1000) * 0.25;
+  score += Math.min(item.purchase_count || 0, 5000) * 0.08;
   score += Math.min(item.wish_count || 0, 500) * 0.35;
   score += Math.min(item.review_count || 0, 100) * 3;
   score += (item.average_rating || 0) * 10;
@@ -352,9 +443,7 @@ function sortProducts(items: Product[], sort: SortOption, query: string): Produc
     if (sort === 'price_low') return a.price - b.price;
     if (sort === 'price_high') return b.price - a.price;
     if (sort === 'popular') {
-      const aPopularity = (a.purchase_count || 0) + (a.wish_count || 0) + (a.review_count || 0) * 5;
-      const bPopularity = (b.purchase_count || 0) + (b.wish_count || 0) + (b.review_count || 0) * 5;
-      return bPopularity - aPopularity;
+      return popularitySignal(b) - popularitySignal(a);
     }
     if (sort === 'newest') return new Date(b.regist_date || 0).getTime() - new Date(a.regist_date || 0).getTime();
     return keywordScore(b, query) - keywordScore(a, query);
@@ -386,7 +475,7 @@ function mapTeachermallItem(item: any): Product {
     mall: 'teachermall',
     mall_name: '티처몰',
     provider_name: item.provider_name,
-    purchase_count: parseNumber(item.purchase_ea_total || item.purchase_ea) || undefined,
+    purchase_count: normalizePurchaseCount(item.purchase_ea_total || item.purchase_ea),
     badges: item.image_badge ? (Array.isArray(item.image_badge) ? item.image_badge : [item.image_badge]) : undefined,
     properties: item.properties,
     regist_date: item.regist_date,
@@ -577,23 +666,38 @@ async function buildBudgetKit(params: {
       return tokens.length === 0 || tokens.some(token => haystack.includes(token));
     })
     .sort((a, b) => {
-      const aValue = keywordScore(a, baseNeeds.join(' ')) / Math.max(a.price, 500);
-      const bValue = keywordScore(b, baseNeeds.join(' ')) / Math.max(b.price, 500);
+      const aValue = valueScore(a, baseNeeds.join(' ')) / Math.max(a.price, 500);
+      const bValue = valueScore(b, baseNeeds.join(' ')) / Math.max(b.price, 500);
       return bValue - aValue;
     });
 
   const lines: BudgetLine[] = [];
   let totalCost = 0;
+  const categoryTargets = ['구기던지기', '공간표시', '팀구분', '뉴스포츠', '안전운영'];
+  const orderedCandidates = [
+    ...categoryTargets.flatMap(category => unique.filter(item => categoryForProduct(item) === category).slice(0, 2)),
+    ...unique,
+  ];
 
-  for (const item of unique) {
+  for (const item of orderedCandidates) {
     if (lines.length >= params.itemCount) break;
+    if (lines.some(line => line.mall === item.mall && line.goods_seq === item.goods_seq)) continue;
     const remaining = params.maxBudget - totalCost;
     if (item.price > remaining) continue;
-    const targetQuantity = item.price < 3000 ? 20 : item.price < 12000 ? 8 : item.price < 35000 ? 4 : 1;
+    const category = categoryForProduct(item);
+    const targetQuantity = category === '팀구분'
+      ? Math.min(30, Math.max(10, Math.floor(params.maxBudget / Math.max(item.price, 1) / 20)))
+      : category === '공간표시'
+        ? Math.min(24, item.price < 3000 ? 20 : 4)
+        : category === '구기던지기'
+          ? item.price < 4000 ? 12 : item.price < 20000 ? 6 : 3
+          : category === '뉴스포츠'
+            ? item.price < 12000 ? 8 : item.price < 40000 ? 4 : 1
+            : item.price < 5000 ? 3 : 1;
     const quantity = Math.max(1, Math.min(targetQuantity, Math.floor(remaining / item.price)));
     const lineCost = item.price * quantity;
     if (lineCost <= remaining) {
-      lines.push({ ...item, quantity, useCase: useCaseForProduct(item, params.purpose) });
+      lines.push({ ...item, quantity, category, useCase: useCaseForProduct(item, params.purpose) });
       totalCost += lineCost;
     }
   }
@@ -621,6 +725,285 @@ async function buildBudgetKit(params: {
     allCandidates: unique.slice(0, 30),
     needs: baseNeeds,
   };
+}
+
+function candidateKey(item: Pick<Product, 'mall' | 'goods_seq'>): string {
+  return `${item.mall}:${item.goods_seq}`;
+}
+
+function sanitizeRecommendation(raw: unknown, candidates: Product[], prompt: string, intent: ParsedPrompt): RecommendationResponse | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const data = raw as GeminiRecommendationResponse;
+  const candidateMap = new Map(candidates.map(item => [candidateKey(item), item]));
+  const selected: BudgetLine[] = [];
+  let totalCost = 0;
+
+  for (const choice of data.selected || []) {
+    const mall = choice.mall === 'teachermall' || choice.mall === 'iscream' ? choice.mall : undefined;
+    const key = mall && choice.goods_seq ? `${mall}:${choice.goods_seq}` : '';
+    const item = candidateMap.get(key);
+    if (!item || selected.some(line => candidateKey(line) === key)) continue;
+    const quantity = Math.max(1, Math.min(40, Math.floor(Number(choice.quantity) || 1)));
+    const affordableQuantity = Math.min(quantity, Math.floor((intent.maxBudget - totalCost) / item.price));
+    if (affordableQuantity <= 0) continue;
+    totalCost += item.price * affordableQuantity;
+    selected.push({
+      ...item,
+      quantity: affordableQuantity,
+      category: choice.category || categoryForProduct(item),
+      reason: String(choice.reason || '').trim() || '수업 목적과 예산 조건에 맞는 후보입니다.',
+      activities: Array.isArray(choice.activities) ? choice.activities.map(String).filter(Boolean).slice(0, 4) : [],
+      risks: Array.isArray(choice.risks) ? choice.risks.map(String).filter(Boolean).slice(0, 3) : [],
+      useCase: Array.isArray(choice.activities) && choice.activities.length
+        ? choice.activities.map(String).slice(0, 2).join(', ')
+        : useCaseForProduct(item, intent.purpose),
+    });
+  }
+
+  if (selected.length === 0) return null;
+
+  const rejected = (data.rejected || []).flatMap(reject => {
+    const mall = reject.mall === 'teachermall' || reject.mall === 'iscream' ? reject.mall : undefined;
+    const item = mall && reject.goods_seq ? candidateMap.get(`${mall}:${reject.goods_seq}`) : undefined;
+    if (!item) return [];
+    return [{
+      mall: item.mall,
+      goods_seq: item.goods_seq,
+      goods_name: item.goods_name,
+      reason: String(reject.reason || '수업 목적 또는 예산 우선순위에서 밀렸습니다.').trim(),
+    }];
+  }).slice(0, 8);
+
+  return {
+    parser: 'gemini',
+    summary: String(data.summary || `${intent.grade || ''} ${intent.purpose} 수업을 위한 구매안을 구성했습니다.`).trim(),
+    strategy: String(data.strategy || '실제 검색 후보 안에서 수업 활용도, 반응 신호, 예산 균형을 함께 보았습니다.').trim(),
+    items: selected,
+    rejected,
+    coverage: Array.isArray(data.coverage) ? data.coverage.map(String).filter(Boolean).slice(0, 8) : [],
+    totalCost,
+    remaining: intent.maxBudget - totalCost,
+  };
+}
+
+function maxUsefulQuantity(item: BudgetLine): number {
+  const category = item.category || categoryForProduct(item);
+  if (category === '팀구분') return 30;
+  if (category === '공간표시') return item.price < 3000 ? 36 : 8;
+  if (category === '구기던지기') return item.price < 5000 ? 20 : item.price < 15000 ? 10 : 6;
+  if (category === '뉴스포츠') return item.price < 12000 ? 12 : item.price < 40000 ? 6 : 2;
+  if (category === '안전운영') return 4;
+  return 3;
+}
+
+function recalculateRecommendation(rec: RecommendationResponse, budget: number): RecommendationResponse {
+  const totalCost = rec.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  return { ...rec, totalCost, remaining: budget - totalCost };
+}
+
+function fillRecommendationBudget(rec: RecommendationResponse, candidates: Product[], intent: ParsedPrompt): RecommendationResponse {
+  const selectedKeys = new Set(rec.items.map(candidateKey));
+  const wantedCategories = ['공간표시', '팀구분', '구기던지기', '뉴스포츠', '안전운영'];
+  let next = recalculateRecommendation(rec, intent.maxBudget);
+
+  for (const category of wantedCategories) {
+    if (next.totalCost >= intent.maxBudget * 0.92) break;
+    if (next.items.some(item => (item.category || categoryForProduct(item)) === category)) continue;
+    const candidate = candidates
+      .filter(item => !selectedKeys.has(candidateKey(item)))
+      .filter(item => categoryForProduct(item) === category)
+      .sort((a, b) => valueScore(b, intent.needs.join(' ')) - valueScore(a, intent.needs.join(' ')))
+      .find(item => item.price <= next.remaining);
+    if (!candidate) continue;
+    const quantity = Math.max(1, Math.min(
+      maxUsefulQuantity({ ...candidate, quantity: 1, useCase: '', category }),
+      Math.floor(next.remaining / candidate.price),
+    ));
+    if (quantity <= 0) continue;
+    selectedKeys.add(candidateKey(candidate));
+    next = recalculateRecommendation({
+      ...next,
+      items: [
+        ...next.items,
+        {
+          ...candidate,
+          quantity,
+          category,
+          reason: `${category} 영역 보강을 위해 실제 검색 후보에서 추가했습니다.`,
+          activities: [useCaseForProduct(candidate, intent.purpose)],
+          risks: [],
+          useCase: useCaseForProduct(candidate, intent.purpose),
+        },
+      ],
+      coverage: [...new Set([...next.coverage, category])],
+    }, intent.maxBudget);
+  }
+
+  let guard = 0;
+  while (guard < 200 && next.totalCost < intent.maxBudget * 0.94) {
+    const target = [...next.items]
+      .filter(item => item.quantity < maxUsefulQuantity(item))
+      .filter(item => item.price <= next.remaining)
+      .sort((a, b) => b.price - a.price)[0];
+    if (!target) break;
+    next = recalculateRecommendation({
+      ...next,
+      items: next.items.map(item => candidateKey(item) === candidateKey(target)
+        ? { ...item, quantity: item.quantity + 1 }
+        : item),
+    }, intent.maxBudget);
+    guard += 1;
+  }
+
+  const hasAmountInSummary = /총\s*예산|총액|잔액|[\d,]+\s*원/.test(next.summary);
+  const coverage = next.coverage.length ? next.coverage.join(', ') : [...new Set(next.items.map(item => item.category || categoryForProduct(item)))].join(', ');
+  return {
+    ...next,
+    summary: hasAmountInSummary
+      ? `${intent.grade || ''} ${intent.purpose} 수업을 위해 ${coverage} 영역을 중심으로 실제 구매 가능한 상품만 선별했습니다.`.trim()
+      : next.summary,
+    strategy: `${next.strategy} 서버가 최종 단계에서 상품 ID, 가격, 구매 링크, 예산 초과 여부를 다시 검증했습니다.`,
+  };
+}
+
+function fallbackRecommendation(candidates: Product[], intent: ParsedPrompt): RecommendationResponse {
+  const grouped = new Map<string, Product[]>();
+  for (const item of candidates) {
+    const category = categoryForProduct(item);
+    grouped.set(category, [...(grouped.get(category) || []), item]);
+  }
+
+  const ordered = ['구기던지기', '공간표시', '팀구분', '뉴스포츠', '안전운영', '기타']
+    .flatMap(category => (grouped.get(category) || []).slice(0, category === '기타' ? 2 : 3));
+  const selected: BudgetLine[] = [];
+  let totalCost = 0;
+
+  for (const item of ordered) {
+    if (selected.length >= 10 || selected.some(line => candidateKey(line) === candidateKey(item))) continue;
+    const category = categoryForProduct(item);
+    const targetQuantity = category === '팀구분'
+      ? 20
+      : category === '공간표시'
+        ? item.price < 3000 ? 20 : 4
+        : category === '구기던지기'
+          ? item.price < 12000 ? 8 : 4
+          : category === '뉴스포츠'
+            ? item.price < 15000 ? 6 : 2
+            : 1;
+    const quantity = Math.min(targetQuantity, Math.floor((intent.maxBudget - totalCost) / item.price));
+    if (quantity <= 0) continue;
+    totalCost += item.price * quantity;
+    selected.push({
+      ...item,
+      quantity,
+      category,
+      reason: `${category} 영역을 채우기 위해 선택했습니다.`,
+      activities: [useCaseForProduct(item, intent.purpose)],
+      risks: [],
+      useCase: useCaseForProduct(item, intent.purpose),
+    });
+  }
+
+  return {
+    parser: 'rules',
+    summary: `${intent.grade || ''} ${intent.purpose} 수업용으로 카테고리 균형을 맞춘 예산안을 구성했습니다.`.trim(),
+    strategy: '상품 후보를 구기/공간표시/팀구분/뉴스포츠/안전운영으로 나누고 예산 안에서 중복을 줄였습니다.',
+    items: selected,
+    rejected: candidates
+      .filter(item => !selected.some(line => candidateKey(line) === candidateKey(item)))
+      .slice(0, 5)
+      .map(item => ({ mall: item.mall, goods_seq: item.goods_seq, goods_name: item.goods_name, reason: '카테고리 중복 또는 예산 우선순위에서 제외' })),
+    coverage: [...new Set(selected.map(item => item.category || categoryForProduct(item)))],
+    totalCost,
+    remaining: intent.maxBudget - totalCost,
+  };
+}
+
+async function recommendWithGemini(prompt: string, intent: ParsedPrompt, candidates: Product[]): Promise<RecommendationResponse> {
+  const cleanCandidates = candidates
+    .filter(item => item.price > 0 && item.shop_url)
+    .slice(0, 36);
+
+  if (!geminiApiKey || cleanCandidates.length === 0) {
+    return fillRecommendationBudget(fallbackRecommendation(cleanCandidates, intent), cleanCandidates, intent);
+  }
+
+  const candidatePayload = cleanCandidates.map(item => ({
+    mall: item.mall,
+    goods_seq: item.goods_seq,
+    name: item.goods_name,
+    price: item.price,
+    mall_name: item.mall_name,
+    category: categoryForProduct(item),
+    provider: item.provider_name,
+    purchase_count: Math.min(item.purchase_count || 0, 5000),
+    wish_count: item.wish_count || 0,
+    review_count: item.review_count || 0,
+    rating: item.average_rating || 0,
+    link: item.shop_url,
+  }));
+
+  try {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent`;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': geminiApiKey,
+      },
+      body: JSON.stringify({
+        system_instruction: {
+          parts: [{
+            text: [
+              '너는 한국 초등교사를 돕는 교구 구매 큐레이터다.',
+              '반드시 제공된 candidates 안에서만 추천한다. 상품명, 가격, 링크, goods_seq를 지어내지 않는다.',
+              '예산을 넘기지 말고, 수업 활용 다양성을 위해 카테고리 균형을 맞춘다.',
+              '부적합하거나 중복된 후보는 rejected에 이유를 적는다.',
+              '응답은 JSON 객체 하나만 반환한다.',
+            ].join('\n'),
+          }],
+        },
+        contents: [{
+          role: 'user',
+          parts: [{
+            text: [
+              `사용자 요청: ${prompt}`,
+              `해석된 조건: ${JSON.stringify(intent)}`,
+              `후보 상품: ${JSON.stringify(candidatePayload)}`,
+              '',
+              'JSON schema:',
+              '{',
+              '  "summary": "교사용 구매안 한 문단",',
+              '  "strategy": "왜 이 조합인지",',
+              '  "coverage": ["구기던지기", "공간표시"],',
+              '  "selected": [',
+              '    { "mall": "teachermall", "goods_seq": "123", "quantity": 4, "category": "구기던지기", "reason": "선정 이유", "activities": ["활동1"], "risks": ["확인사항"] }',
+              '  ],',
+              '  "rejected": [',
+              '    { "mall": "iscream", "goods_seq": "456", "reason": "제외 이유" }',
+              '  ]',
+              '}',
+            ].join('\n'),
+          }],
+        }],
+        generationConfig: {
+          temperature: 0.25,
+          response_mime_type: 'application/json',
+        },
+      }),
+    });
+
+    if (!response.ok) throw new Error(`Gemini recommendation failed: ${response.status} ${response.statusText}`);
+    const json = await response.json() as any;
+    const text = json.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || '').join('').trim();
+    if (!text) throw new Error('Gemini returned an empty recommendation response');
+    const recommendation = sanitizeRecommendation(parseJsonObject(text), cleanCandidates, prompt, intent)
+      || fallbackRecommendation(cleanCandidates, intent);
+    return fillRecommendationBudget(recommendation, cleanCandidates, intent);
+  } catch (error) {
+    console.warn('[Gemini] Falling back to deterministic recommendation:', error instanceof Error ? error.message : String(error));
+    return fillRecommendationBudget(fallbackRecommendation(cleanCandidates, intent), cleanCandidates, intent);
+  }
 }
 
 function numberParam(value: unknown, fallback: number): number {
@@ -675,14 +1058,14 @@ app.post('/api/intent', async (req, res) => {
   try {
     const prompt = String(req.body.prompt || '').trim();
     if (!prompt) return res.status(400).json({ error: 'prompt is required' });
-    const fallbackIntent = parseNaturalPrompt(prompt);
+    const fallbackIntent = strengthenIntent(parseNaturalPrompt(prompt), prompt);
     let parser: 'gemini' | 'rules' = 'rules';
     let intent = fallbackIntent;
 
     try {
       const geminiIntent = await parsePromptWithGemini(prompt, fallbackIntent);
       if (geminiIntent) {
-        intent = geminiIntent;
+        intent = strengthenIntent(geminiIntent, prompt);
         parser = 'gemini';
       }
     } catch (error) {
@@ -690,24 +1073,27 @@ app.post('/api/intent', async (req, res) => {
     }
 
     const query = [intent.grade, intent.purpose, '교구'].filter(Boolean).join(' ');
-    const [items, budgetKit] = await Promise.all([
-      searchProducts(query, {
+    const candidates = (await Promise.all(
+      [query, ...intent.needs].map(need => searchProducts(need, {
         source: intent.source,
         sort: intent.sort,
-        limit: 18,
+        limit: 12,
         maxPrice: intent.maxBudget,
-      }),
-      intent.shouldBuildBudget
-        ? buildBudgetKit({
-          purpose: intent.purpose,
-          grade: intent.grade,
-          maxBudget: intent.maxBudget,
-          itemCount: 12,
-          source: intent.source,
-          needs: intent.needs,
-        })
-        : Promise.resolve(null),
-    ]);
+      })),
+    )).flat();
+    const items = Array.from(new Map(candidates.map(item => [candidateKey(item), item])).values()).slice(0, 24);
+    const recommendation = intent.shouldBuildBudget
+      ? await recommendWithGemini(prompt, intent, items)
+      : null;
+    const budgetKit = recommendation
+      ? {
+        items: recommendation.items,
+        totalCost: recommendation.totalCost,
+        remaining: recommendation.remaining,
+        allCandidates: items,
+        needs: intent.needs,
+      }
+      : null;
 
     res.json({
       prompt,
@@ -716,7 +1102,31 @@ app.post('/api/intent', async (req, res) => {
       query,
       items,
       budgetKit,
+      recommendation,
     });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post('/api/recommend', async (req, res) => {
+  try {
+    const prompt = String(req.body.prompt || '').trim();
+    if (!prompt) return res.status(400).json({ error: 'prompt is required' });
+    const fallbackIntent = strengthenIntent(parseNaturalPrompt(prompt), prompt);
+    const intent = strengthenIntent(await parsePromptWithGemini(prompt, fallbackIntent).catch(() => null) || fallbackIntent, prompt);
+    const query = [intent.grade, intent.purpose, '교구'].filter(Boolean).join(' ');
+    const candidates = (await Promise.all(
+      [query, ...intent.needs].map(need => searchProducts(need, {
+        source: intent.source,
+        sort: intent.sort,
+        limit: 12,
+        maxPrice: intent.maxBudget,
+      })),
+    )).flat();
+    const uniqueCandidates = Array.from(new Map(candidates.map(item => [candidateKey(item), item])).values());
+    const recommendation = await recommendWithGemini(prompt, intent, uniqueCandidates);
+    res.json({ prompt, intent, query, candidates: uniqueCandidates.slice(0, 30), recommendation });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }

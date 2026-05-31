@@ -26,6 +26,10 @@ export interface Product {
 export interface BudgetLine extends Product {
   quantity: number;
   useCase: string;
+  reason?: string;
+  activities?: string[];
+  risks?: string[];
+  category?: string;
 }
 
 export interface BudgetKitResponse {
@@ -34,4 +38,20 @@ export interface BudgetKitResponse {
   remaining: number;
   allCandidates: Product[];
   needs: string[];
+}
+
+export interface RecommendationResponse {
+  parser: 'gemini' | 'rules';
+  summary: string;
+  strategy: string;
+  items: BudgetLine[];
+  rejected: Array<{
+    goods_seq: string;
+    mall: Product['mall'];
+    goods_name: string;
+    reason: string;
+  }>;
+  coverage: string[];
+  totalCost: number;
+  remaining: number;
 }

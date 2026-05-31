@@ -284,6 +284,80 @@ select:focus {
   margin-bottom: 18px;
 }
 
+.recommendation-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid #bfe2dc;
+  border-radius: 8px;
+  background: #f5fffc;
+}
+
+.recommendation-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.recommendation-title div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #0b756a;
+  font-weight: 850;
+}
+
+.recommendation-title strong {
+  color: #17202a;
+  font-size: 16px;
+}
+
+.recommendation-summary,
+.recommendation-strategy {
+  margin: 0;
+  color: #334557;
+}
+
+.recommendation-summary {
+  font-weight: 750;
+}
+
+.coverage-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.coverage-list span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  color: #225b78;
+  background: #e8f4fb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.rejected-list {
+  padding-top: 6px;
+  color: #56687a;
+  font-size: 13px;
+}
+
+.rejected-list summary {
+  cursor: pointer;
+  color: #405164;
+  font-weight: 800;
+}
+
+.rejected-list p {
+  margin: 8px 0 0;
+}
+
 h1 {
   margin: 0;
   font-size: 24px;
@@ -507,6 +581,14 @@ h1 {
   margin: 5px 0 0 16px;
   color: #647586;
   font-size: 12px;
+}
+
+.cart-line .line-reason {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  color: #0b756a;
+  font-weight: 750;
 }
 
 .mall-dot {
