@@ -1242,43 +1242,81 @@ h1 {
 
   .topbar {
     height: auto;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 14px;
-    padding: 16px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .brand {
+    min-width: 0;
+  }
+
+  .brand strong {
+    font-size: 17px;
+  }
+
+  .brand span:last-child {
+    font-size: 12px;
   }
 
   .tabs {
     overflow-x: auto;
+    width: 100%;
+  }
+
+  .tabs button {
+    flex: 1 0 auto;
+    justify-content: center;
+  }
+
+  .logout-button {
+    width: 100%;
+    justify-content: center;
   }
 
   .auth-screen {
     justify-items: center;
-    padding: 28px 16px;
+    min-height: calc(100vh - 132px);
+    padding: 24px 14px;
     background:
       linear-gradient(180deg, rgba(245, 248, 251, 0.92), rgba(245, 248, 251, 0.72)),
       url('/readywater-hero.jpg') center / cover no-repeat;
   }
 
+  .auth-card {
+    padding: 22px;
+  }
+
   .workspace {
     display: block;
-    padding: 12px;
+    padding: 10px;
   }
 
   .filter-panel,
+  .result-panel,
   .cart-panel {
     position: static;
     margin-bottom: 12px;
+    padding: 14px;
   }
 
   .section-head {
     display: block;
   }
 
+  h1 {
+    font-size: 21px;
+  }
+
   .results-header,
   .result-tools {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .results-header {
+    gap: 10px;
   }
 
   .result-tools {
@@ -1292,19 +1330,116 @@ h1 {
   .result-pills {
     overflow-x: auto;
     padding-bottom: 2px;
+    scrollbar-width: none;
   }
 
   .product-table {
-    overflow-x: auto;
+    display: grid;
+    gap: 12px;
+    overflow: visible;
+    border: 0;
+    background: transparent;
   }
 
-  .product-table-head,
+  .product-table-head {
+    display: none;
+  }
+
   .product-row {
-    min-width: 980px;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr;
+    overflow: hidden;
+    border: 1px solid #dce5ed;
+    border-radius: 8px;
+    background: #ffffff;
+  }
+
+  .product-row > * {
+    border-right: 0;
+    border-bottom: 1px solid #e6edf3;
+    padding: 12px;
+  }
+
+  .product-row > *:last-child {
+    border-bottom: 0;
+  }
+
+  .mall-cell {
+    flex-direction: row;
+    justify-content: flex-start;
+    text-align: left;
+    background: #f7fafc;
+  }
+
+  .product-row > .info-cell {
+    grid-template-columns: 96px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .info-cell img {
+    width: 88px;
+    height: 78px;
+  }
+
+  .info-cell h2 {
+    font-size: 14px;
+  }
+
+  .table-price,
+  .signal-cell,
+  .rating-cell,
+  .buy-button,
+  .quantity-stepper {
+    min-height: 46px;
+  }
+
+  .table-price,
+  .signal-cell,
+  .rating-cell {
+    justify-content: space-between;
+    flex-direction: row;
+    text-align: left;
+  }
+
+  .table-price::before,
+  .signal-cell::before,
+  .rating-cell::before,
+  .quantity-stepper::before {
+    color: #66788a;
+    font-size: 12px;
+    font-weight: 850;
+  }
+
+  .table-price::before {
+    content: '가격';
+  }
+
+  .signal-cell::before {
+    content: '인기도';
+  }
+
+  .rating-cell::before {
+    content: '평점';
+  }
+
+  .quantity-stepper::before {
+    content: '수량';
+    margin-right: auto;
+  }
+
+  .buy-button {
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .quantity-stepper {
+    justify-content: flex-end;
   }
 
   .prompt-search {
     grid-template-columns: 1fr;
+    padding: 12px;
   }
 
   .quick-prompts {
@@ -1328,5 +1463,70 @@ h1 {
   .product-card img {
     width: 88px;
     height: 88px;
+  }
+
+  .cart-lines {
+    max-height: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .workspace {
+    padding: 8px;
+  }
+
+  .filter-panel,
+  .result-panel,
+  .cart-panel {
+    padding: 12px;
+  }
+
+  .prompt-search button,
+  .primary-action,
+  .secondary-action {
+    width: 100%;
+  }
+
+  .view-toggle {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .view-toggle button {
+    justify-content: center;
+  }
+
+  .result-pills button {
+    flex: 0 0 auto;
+  }
+
+  .product-row > .info-cell,
+  .product-card {
+    grid-template-columns: 82px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .info-cell img,
+  .product-card img {
+    width: 76px;
+    height: 70px;
+  }
+
+  .tag-row {
+    gap: 4px;
+  }
+
+  .tag-row span {
+    min-height: 21px;
+    padding: 0 6px;
+  }
+
+  .export-actions button {
+    flex-basis: 100%;
   }
 }
