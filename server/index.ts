@@ -1,4 +1,6 @@
 import express from 'express';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 type MallSource = 'all' | 'teachermall' | 'iscream';
 type SortOption = 'relevance' | 'price_low' | 'price_high' | 'popular' | 'newest';
@@ -50,8 +52,40 @@ interface ParsedPrompt {
   shouldCompare: boolean;
 }
 
+interface GeminiIntentResponse {
+  grade?: string;
+  purpose?: string;
+  maxBudget?: number;
+  source?: MallSource;
+  sort?: SortOption;
+  needs?: string[];
+  shouldBuildBudget?: boolean;
+  shouldCompare?: boolean;
+}
+
+function loadEnvFiles(): void {
+  for (const fileName of ['.env.local', '.env']) {
+    const filePath = resolve(process.cwd(), fileName);
+    if (!existsSync(filePath)) continue;
+
+    for (const line of readFileSync(filePath, 'utf8').split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const separator = trimmed.indexOf('=');
+      if (separator === -1) continue;
+      const key = trimmed.slice(0, separator).trim();
+      const value = trimmed.slice(separator + 1).trim().replace(/^['"]|['"]$/g, '');
+      if (key && process.env[key] === undefined) process.env[key] = value;
+    }
+  }
+}
+
+loadEnvFiles();
+
 const app = express();
 const PORT = Number(process.env.PORT || 5191);
+const geminiApiKey = process.env.GEMINI_API_KEY || '';
+const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -180,6 +214,113 @@ function parseNaturalPrompt(prompt: string): ParsedPrompt {
     shouldBuildBudget: /예산|구입|구매|리스트|리스트업|추천|구성/.test(normalized),
     shouldCompare: /비교|둘 다|통합|티처몰|티쳐몰|아이스크림/.test(normalized),
   };
+}
+
+function parseJsonObject(text: string): unknown {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced?.[1] || text;
+  const firstBrace = candidate.indexOf('{');
+  const lastBrace = candidate.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error('Gemini response did not contain a JSON object');
+  }
+  return JSON.parse(candidate.slice(firstBrace, lastBrace + 1));
+}
+
+function toMallSource(value: unknown, fallback: MallSource): MallSource {
+  return value === 'teachermall' || value === 'iscream' || value === 'all' ? value : fallback;
+}
+
+function toSortOption(value: unknown, fallback: SortOption): SortOption {
+  return value === 'relevance' || value === 'price_low' || value === 'price_high' || value === 'popular' || value === 'newest'
+    ? value
+    : fallback;
+}
+
+function sanitizeGeminiIntent(raw: unknown, fallback: ParsedPrompt): ParsedPrompt {
+  const data = (raw && typeof raw === 'object' ? raw : {}) as GeminiIntentResponse;
+  const maxBudget = Number(data.maxBudget);
+  const needs = Array.isArray(data.needs)
+    ? data.needs.map(item => String(item).trim()).filter(Boolean).slice(0, 10)
+    : fallback.needs;
+
+  return {
+    grade: data.grade ? String(data.grade).trim() : fallback.grade,
+    purpose: data.purpose ? String(data.purpose).trim().slice(0, 40) : fallback.purpose,
+    maxBudget: Number.isFinite(maxBudget) && maxBudget >= 1000 ? maxBudget : fallback.maxBudget,
+    source: toMallSource(data.source, fallback.source),
+    sort: toSortOption(data.sort, fallback.sort),
+    needs: needs.length > 0 ? needs : fallback.needs,
+    shouldBuildBudget: typeof data.shouldBuildBudget === 'boolean' ? data.shouldBuildBudget : fallback.shouldBuildBudget,
+    shouldCompare: typeof data.shouldCompare === 'boolean' ? data.shouldCompare : fallback.shouldCompare,
+  };
+}
+
+async function parsePromptWithGemini(prompt: string, fallback: ParsedPrompt): Promise<ParsedPrompt | null> {
+  if (!geminiApiKey) return null;
+
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent`;
+  const body = {
+    system_instruction: {
+      parts: [{
+        text: [
+          '너는 한국 초등교사용 쇼핑 검색 의도 분석기다.',
+          '반드시 실제 상품/가격/링크를 지어내지 말고, 검색 조건 JSON만 만든다.',
+          'source는 all, teachermall, iscream 중 하나다.',
+          'sort는 relevance, price_low, price_high, popular, newest 중 하나다.',
+          'maxBudget은 원 단위 숫자다.',
+          'needs는 쇼핑몰 검색에 직접 쓸 구체 키워드 배열이다.',
+          '응답은 마크다운 없이 JSON 객체 하나만 반환한다.',
+        ].join('\n'),
+      }],
+    },
+    contents: [{
+      role: 'user',
+      parts: [{
+        text: [
+          `사용자 요청: ${prompt}`,
+          '',
+          'JSON schema:',
+          '{',
+          '  "grade": "6학년",',
+          '  "purpose": "체육교육",',
+          '  "maxBudget": 1000000,',
+          '  "source": "all",',
+          '  "sort": "popular",',
+          '  "needs": ["피구공", "원마커"],',
+          '  "shouldBuildBudget": true,',
+          '  "shouldCompare": true',
+          '}',
+        ].join('\n'),
+      }],
+    }],
+    generationConfig: {
+      temperature: 0.1,
+      response_mime_type: 'application/json',
+    },
+  };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': geminiApiKey,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gemini intent parsing failed: ${response.status} ${response.statusText}`);
+  }
+
+  const json = await response.json() as any;
+  const text = json.candidates?.[0]?.content?.parts
+    ?.map((part: { text?: string }) => part.text || '')
+    .join('')
+    .trim();
+
+  if (!text) throw new Error('Gemini returned an empty intent response');
+  return sanitizeGeminiIntent(parseJsonObject(text), fallback);
 }
 
 function keywordScore(item: Product, query: string): number {
@@ -488,7 +629,12 @@ function numberParam(value: unknown, fallback: number): number {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'readywater-web', time: new Date().toISOString() });
+  res.json({
+    ok: true,
+    service: 'readywater-web',
+    llm: geminiApiKey ? { provider: 'gemini', model: geminiModel } : { provider: 'rules' },
+    time: new Date().toISOString(),
+  });
 });
 
 app.get('/api/search', async (req, res) => {
@@ -529,7 +675,20 @@ app.post('/api/intent', async (req, res) => {
   try {
     const prompt = String(req.body.prompt || '').trim();
     if (!prompt) return res.status(400).json({ error: 'prompt is required' });
-    const intent = parseNaturalPrompt(prompt);
+    const fallbackIntent = parseNaturalPrompt(prompt);
+    let parser: 'gemini' | 'rules' = 'rules';
+    let intent = fallbackIntent;
+
+    try {
+      const geminiIntent = await parsePromptWithGemini(prompt, fallbackIntent);
+      if (geminiIntent) {
+        intent = geminiIntent;
+        parser = 'gemini';
+      }
+    } catch (error) {
+      console.warn('[Gemini] Falling back to rule parser:', error instanceof Error ? error.message : String(error));
+    }
+
     const query = [intent.grade, intent.purpose, '교구'].filter(Boolean).join(' ');
     const [items, budgetKit] = await Promise.all([
       searchProducts(query, {
@@ -552,6 +711,7 @@ app.post('/api/intent', async (req, res) => {
 
     res.json({
       prompt,
+      parser,
       intent,
       query,
       items,

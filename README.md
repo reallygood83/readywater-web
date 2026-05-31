@@ -5,6 +5,7 @@ Readywater Web is a local browser UI for searching Teachermall and i-Scream Mall
 ## What It Does
 
 - Natural-language prompt search in Korean.
+- Gemini-backed intent parsing with rule-based fallback.
 - Unified product search across 티처몰 and 아이스크림몰.
 - Budget kit generation with quantity, total, remaining budget, and purchase links.
 - Product cards with mall badge, price, popularity signals, image, and direct purchase URL.
@@ -15,6 +16,7 @@ Readywater Web is a local browser UI for searching Teachermall and i-Scream Mall
 
 ```bash
 npm install
+cp .env.example .env
 npm run dev
 ```
 
@@ -46,7 +48,7 @@ http://127.0.0.1:5191
 }
 ```
 
-It extracts grade, purpose, budget, mall scope, sort intent, and need keywords, then returns search results plus a budget kit when the prompt asks for purchasing or recommendation.
+It uses Gemini when `GEMINI_API_KEY` is configured. If Gemini is unavailable, it falls back to the local rule-based parser. It extracts grade, purpose, budget, mall scope, sort intent, and need keywords, then returns search results plus a budget kit when the prompt asks for purchasing or recommendation.
 
 ## Document Export Direction
 

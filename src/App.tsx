@@ -131,6 +131,7 @@ function App() {
       });
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json() as {
+        parser: 'gemini' | 'rules';
         intent: {
           grade?: string;
           purpose: string;
@@ -154,10 +155,10 @@ function App() {
         setKit(data.budgetKit);
         setSelected(data.budgetKit.items);
         setActiveTab('budget');
-        setStatus(`요청을 해석해 ${formatWon(data.budgetKit.totalCost)} 예산안을 만들었습니다.`);
+        setStatus(`${data.parser === 'gemini' ? 'Gemini AI' : '룰 기반'}로 요청을 해석해 ${formatWon(data.budgetKit.totalCost)} 예산안을 만들었습니다.`);
       } else {
         setActiveTab('search');
-        setStatus(`요청을 해석해 ${data.items.length}개 상품을 찾았습니다.`);
+        setStatus(`${data.parser === 'gemini' ? 'Gemini AI' : '룰 기반'}로 요청을 해석해 ${data.items.length}개 상품을 찾았습니다.`);
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
