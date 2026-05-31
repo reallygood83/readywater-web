@@ -7,6 +7,7 @@ Readywater Web is a local browser UI for searching Teachermall and i-Scream Mall
 - Natural-language prompt search in Korean.
 - Gemini-backed intent parsing with rule-based fallback.
 - Gemini-backed purchase curation from real retrieved product candidates.
+- Search progress modal that explains the AI/search/validation stages while users wait.
 - Unified product search across 티처몰 and 아이스크림몰.
 - Budget kit generation with quantity, total, remaining budget, and purchase links.
 - Product cards with mall badge, price, popularity signals, image, and direct purchase URL.

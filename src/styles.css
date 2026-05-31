@@ -32,6 +32,84 @@ button {
   min-height: 100vh;
 }
 
+.loading-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(10, 20, 32, 0.34);
+  backdrop-filter: blur(7px);
+}
+
+.loading-modal {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid #cfe1ea;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+.loading-orbit {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0e9f8f, #2563eb);
+  box-shadow: 0 0 0 9px rgba(14, 159, 143, 0.12);
+  animation: breathe 1.7s ease-in-out infinite;
+}
+
+.loading-copy strong {
+  display: block;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.loading-copy p {
+  margin: 8px 0 0;
+  color: #5f6f7e;
+}
+
+.loading-steps {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.loading-steps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: #405164;
+  background: #f3f7fa;
+  font-weight: 750;
+  animation: stepPulse 1.35s ease-in-out infinite;
+}
+
+.loading-steps span {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #ffffff;
+  background: #0e9f8f;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .topbar {
   height: 72px;
   display: flex;
@@ -665,6 +743,26 @@ h1 {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+@keyframes stepPulse {
+  0%,
+  100% {
+    opacity: 0.66;
+  }
+  50% {
+    opacity: 1;
   }
 }
 

@@ -11,6 +11,7 @@ import {
   Settings2,
   ShoppingCart,
   Sparkles,
+  Wand2,
 } from 'lucide-react';
 import type { BudgetKitResponse, BudgetLine, MallSource, Product, RecommendationResponse, SortOption } from './types';
 
@@ -31,6 +32,16 @@ const sortOptions: Array<{ value: SortOption; label: string }> = [
 ];
 
 const seedNeeds = ['피구공', '원마커', '팀조끼', '라바콘', '플라잉디스크'];
+
+const promptPlaceholder = '예: 6학년 체육교육에 100만원 예산으로 반응 좋은 교구를 추천하고 구매 링크까지 알려줘';
+
+const loadingSteps = [
+  '자연어 요청 해석',
+  '티처몰 상품 후보 검색',
+  '아이스크림몰 상품 후보 검색',
+  'Gemini 큐레이션',
+  '예산/구매 링크 검증',
+];
 
 function mallClass(mall: Product['mall']) {
   return mall === 'iscream' ? 'iscream' : 'teachermall';
@@ -57,10 +68,17 @@ function App() {
   const [kit, setKit] = useState<BudgetKitResponse | null>(null);
   const [recommendation, setRecommendation] = useState<RecommendationResponse | null>(null);
   const [selected, setSelected] = useState<BudgetLine[]>([]);
-  const [naturalPrompt, setNaturalPrompt] = useState('6학년 체육교육에 100만원 예산으로 반응 좋은 교구를 추천하고 구매 링크까지 알려줘');
+  const [naturalPrompt, setNaturalPrompt] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMode, setLoadingMode] = useState<'search' | 'budget' | 'prompt' | null>(null);
   const [status, setStatus] = useState('조건을 입력하고 검색을 시작하세요.');
   const [activeTab, setActiveTab] = useState<'search' | 'budget' | 'report'>('search');
+
+  const modalSteps = loadingMode === 'prompt'
+    ? loadingSteps
+    : loadingMode === 'budget'
+      ? ['조건 정리', '상품 후보 검색', '카테고리 균형 계산', '예산 검증']
+      : ['검색 조건 확인', '티처몰 조회', '아이스크림몰 조회', '결과 정렬'];
 
   const totals = useMemo(() => {
     const selectedTotal = selected.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -72,6 +90,7 @@ function App() {
 
   async function runSearch(nextQuery = query) {
     setLoading(true);
+    setLoadingMode('search');
     setStatus('두 몰의 상품 데이터를 검색하고 있습니다.');
     try {
       const params = new URLSearchParams({
@@ -89,11 +108,13 @@ function App() {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
+      setLoadingMode(null);
     }
   }
 
   async function buildKit() {
     setLoading(true);
+    setLoadingMode('budget');
     setActiveTab('budget');
     setStatus('예산에 맞는 조합을 구성하고 있습니다.');
     try {
@@ -120,17 +141,24 @@ function App() {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
+      setLoadingMode(null);
     }
   }
 
   async function runNaturalPrompt() {
+    const prompt = naturalPrompt.trim();
+    if (!prompt) {
+      setStatus('찾고 싶은 수업 상황과 예산을 자연어로 입력해 주세요.');
+      return;
+    }
     setLoading(true);
+    setLoadingMode('prompt');
     setStatus('자연어 요청을 검색 조건과 예산안으로 해석하고 있습니다.');
     try {
       const response = await fetch('/api/intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: naturalPrompt }),
+        body: JSON.stringify({ prompt }),
       });
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json() as {
@@ -169,6 +197,7 @@ function App() {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
+      setLoadingMode(null);
     }
   }
 
@@ -238,6 +267,34 @@ function App() {
 
   return (
     <div className="app-shell">
+      {loading && loadingMode ? (
+        <div className="loading-backdrop" role="status" aria-live="polite">
+          <div className="loading-modal">
+            <div className="loading-orbit">
+              <Sparkles size={22} />
+            </div>
+            <div className="loading-copy">
+              <strong>
+                {loadingMode === 'prompt' ? 'AI가 구매안을 구성하고 있어요' : loadingMode === 'budget' ? '예산안을 계산하고 있어요' : '상품을 검색하고 있어요'}
+              </strong>
+              <p>
+                {loadingMode === 'prompt'
+                  ? 'Gemini가 요청을 해석하고, 실제 상품 후보만 골라 예산과 구매 링크를 다시 확인합니다.'
+                  : '두 몰의 데이터를 모아 가격과 반응 신호를 정리합니다.'}
+              </p>
+            </div>
+            <ol className="loading-steps">
+              {modalSteps.map((step, index) => (
+                <li key={step} style={{ animationDelay: `${index * 0.16}s` }}>
+                  <span>{index + 1}</span>
+                  {step}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      ) : null}
+
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark"><Sparkles size={18} /></span>
@@ -332,10 +389,10 @@ function App() {
               value={naturalPrompt}
               onChange={event => setNaturalPrompt(event.target.value)}
               rows={2}
-              placeholder="예: 6학년 체육교육에 100만원 예산으로 반응 좋은 교구를 추천하고 구매 링크까지 알려줘"
+              placeholder={promptPlaceholder}
             />
             <button onClick={() => void runNaturalPrompt()} disabled={loading}>
-              {loading ? <Loader2 className="spin" size={17} /> : <Sparkles size={17} />}
+              {loading ? <Loader2 className="spin" size={17} /> : <Wand2 size={17} />}
               프롬프트로 찾기
             </button>
           </div>
