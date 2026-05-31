@@ -469,6 +469,82 @@ h1 {
   gap: 12px;
 }
 
+.insight-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.insight-card {
+  padding: 15px;
+  border: 1px solid #dce5ed;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.insight-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: #17202a;
+  font-weight: 850;
+}
+
+.insight-card table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow: hidden;
+  border: 1px solid #dce5ed;
+  border-radius: 7px;
+  font-size: 13px;
+}
+
+.insight-card th,
+.insight-card td {
+  padding: 9px 8px;
+  border-bottom: 1px solid #e6edf3;
+  text-align: left;
+}
+
+.insight-card th {
+  color: #405164;
+  background: #f3f7fa;
+  font-weight: 850;
+}
+
+.insight-card tr:last-child td {
+  border-bottom: 0;
+}
+
+.insight-card p {
+  margin: 10px 0 0;
+  color: #5f6f7e;
+  font-size: 13px;
+}
+
+.idea-list {
+  display: grid;
+  gap: 9px;
+}
+
+.idea-list div {
+  padding: 10px;
+  border-radius: 7px;
+  background: #f3f9fd;
+}
+
+.idea-list strong {
+  display: block;
+  color: #225b78;
+  font-size: 13px;
+}
+
+.idea-list p {
+  margin: 4px 0 0;
+}
+
 .product-card {
   display: grid;
   grid-template-columns: 108px minmax(0, 1fr);
@@ -716,6 +792,7 @@ h1 {
 
 .export-actions {
   gap: 8px;
+  flex-wrap: wrap;
   margin-top: 14px;
 }
 
@@ -724,7 +801,7 @@ h1 {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  flex: 1;
+  flex: 1 1 92px;
   color: #17202a;
   background: #eef4f8;
   font-size: 12px;
@@ -809,6 +886,10 @@ h1 {
   }
 
   .product-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .insight-grid {
     grid-template-columns: 1fr;
   }
 

@@ -1,6 +1,7 @@
 import express from 'express';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import ExcelJS from 'exceljs';
 
 type MallSource = 'all' | 'teachermall' | 'iscream';
 type SortOption = 'relevance' | 'price_low' | 'price_high' | 'popular' | 'newest';
@@ -83,6 +84,16 @@ interface RecommendationResponse {
   remaining: number;
 }
 
+interface EstimateExportItem {
+  goods_name: string;
+  mall_name?: string;
+  provider_name?: string;
+  category?: string;
+  quantity: number;
+  price: number;
+  shop_url?: string;
+}
+
 interface GeminiRecommendationResponse {
   summary?: string;
   strategy?: string;
@@ -126,6 +137,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 5191);
 const geminiApiKey = process.env.GEMINI_API_KEY || '';
 const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const estimateTemplatePath = '/Users/moon/Downloads/에듀파인_견적양식_20260531.xlsx';
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -1145,6 +1157,100 @@ app.post('/api/budget-kit', async (req, res) => {
       needs: Array.isArray(req.body.needs) ? req.body.needs.map(String).filter(Boolean) : undefined,
     });
     res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+function sanitizeExportItems(input: unknown): EstimateExportItem[] {
+  if (!Array.isArray(input)) return [];
+  return input.flatMap(item => {
+    if (!item || typeof item !== 'object') return [];
+    const data = item as Record<string, unknown>;
+    const goodsName = String(data.goods_name || '').trim();
+    const quantity = Math.max(1, Math.floor(Number(data.quantity) || 0));
+    const price = Math.max(0, Math.floor(Number(data.price) || 0));
+    if (!goodsName || quantity <= 0 || price <= 0) return [];
+    return [{
+      goods_name: goodsName,
+      mall_name: data.mall_name ? String(data.mall_name) : undefined,
+      provider_name: data.provider_name ? String(data.provider_name) : undefined,
+      category: data.category ? String(data.category) : undefined,
+      quantity,
+      price,
+      shop_url: data.shop_url ? String(data.shop_url) : undefined,
+    }];
+  });
+}
+
+function exportSpec(item: EstimateExportItem): string {
+  return [
+    item.mall_name,
+    item.category,
+    item.provider_name,
+  ].filter(Boolean).join(' / ');
+}
+
+function estimateFileName(ext: 'xlsx' | 'csv'): string {
+  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  return encodeURIComponent(`에듀파인_견적내역_${stamp}.${ext}`);
+}
+
+app.post('/api/export/estimate.csv', (req, res) => {
+  const items = sanitizeExportItems(req.body?.items);
+  if (items.length === 0) return res.status(400).json({ error: 'items are required' });
+  const rows = [
+    ['내용', '규격', '수량', '단가'],
+    ...items.map(item => [item.goods_name, exportSpec(item), String(item.quantity), String(item.price)]),
+  ];
+  const csv = rows
+    .map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${estimateFileName('csv')}`);
+  res.send(`\uFEFF${csv}`);
+});
+
+app.post('/api/export/estimate.xlsx', async (req, res) => {
+  try {
+    const items = sanitizeExportItems(req.body?.items);
+    if (items.length === 0) return res.status(400).json({ error: 'items are required' });
+    if (!existsSync(estimateTemplatePath)) {
+      return res.status(500).json({ error: `estimate template not found: ${estimateTemplatePath}` });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(estimateTemplatePath);
+    const worksheet = workbook.getWorksheet('품목내역') || workbook.worksheets[0];
+    if (!worksheet) return res.status(500).json({ error: 'template worksheet not found' });
+
+    const headerRow = worksheet.getRow(1);
+    const templateRow = worksheet.getRow(2);
+    const templateStyle = [1, 2, 3, 4].map(index => ({ ...templateRow.getCell(index).style }));
+    const templateHeight = templateRow.height;
+
+    if (worksheet.rowCount > 1) {
+      worksheet.spliceRows(2, worksheet.rowCount - 1);
+    }
+
+    items.forEach((item, index) => {
+      const row = worksheet.getRow(index + 2);
+      row.getCell(1).value = item.goods_name;
+      row.getCell(2).value = exportSpec(item);
+      row.getCell(3).value = item.quantity;
+      row.getCell(4).value = item.price;
+      [1, 2, 3, 4].forEach(cellIndex => {
+        row.getCell(cellIndex).style = { ...templateStyle[cellIndex - 1] };
+      });
+      row.height = templateHeight;
+      row.commit();
+    });
+
+    headerRow.commit();
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${estimateFileName('xlsx')}`);
+    res.send(Buffer.from(buffer));
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }

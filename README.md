@@ -11,7 +11,10 @@ Readywater Web is a local browser UI for searching Teachermall and i-Scream Mall
 - Unified product search across 티처몰 and 아이스크림몰.
 - Budget kit generation with quantity, total, remaining budget, and purchase links.
 - Product cards with mall badge, price, popularity signals, image, and direct purchase URL.
+- Mall comparison summary and lesson-use idea panels.
 - Markdown report download from the selected budget cart.
+- Edufine-ready Excel estimate download using `/Users/moon/Downloads/에듀파인_견적양식_20260531.xlsx`.
+- CSV estimate download with the same `내용, 규격, 수량, 단가` columns.
 - HWPX/PDF export buttons reserved for the next document pipeline.
 
 ## Local Development
@@ -42,6 +45,8 @@ http://127.0.0.1:5191
 - `POST /api/budget-kit`
 - `POST /api/intent`
 - `POST /api/recommend`
+- `POST /api/export/estimate.xlsx`
+- `POST /api/export/estimate.csv`
 
 `/api/intent` accepts a natural-language prompt such as:
 

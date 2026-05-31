@@ -6,6 +6,7 @@ import {
   ExternalLink,
   FileText,
   Loader2,
+  Lightbulb,
   ShieldCheck,
   Search,
   Settings2,
@@ -265,6 +266,68 @@ function App() {
     return acc;
   }, {}), [selected]);
 
+  const mallSummary = useMemo(() => {
+    const rows = ['티처몰', '아이스크림몰'].map(mallName => {
+      const items = selected.filter(item => item.mall_name === mallName);
+      const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      const averagePrice = items.length ? Math.round(items.reduce((sum, item) => sum + item.price, 0) / items.length) : 0;
+      const signals = items.reduce((sum, item) => sum + (item.purchase_count || 0) + (item.wish_count || 0) + (item.review_count || 0), 0);
+      return { mallName, count: items.length, total, averagePrice, signals };
+    });
+    const leader = [...rows].sort((a, b) => b.total - a.total)[0];
+    return { rows, leader: leader?.count ? leader.mallName : '구성 전' };
+  }, [selected]);
+
+  const lessonIdeas = useMemo(() => {
+    const categories = new Set(selected.map(item => item.category).filter(Boolean));
+    const ideas = [];
+    if (categories.has('팀구분') || selected.some(item => /조끼/.test(item.goods_name))) {
+      ideas.push({ title: '팀 빌딩 활동', body: '팀조끼로 모둠을 나누고, 역할을 순환하며 협동 규칙을 연습합니다.' });
+    }
+    if (categories.has('공간표시') || selected.some(item => /마커|콘/.test(item.goods_name))) {
+      ideas.push({ title: '순환 스테이션 수업', body: '원마커와 콘으로 코스를 나누어 던지기, 민첩성, 균형 활동을 동시에 운영합니다.' });
+    }
+    if (categories.has('뉴스포츠')) {
+      ideas.push({ title: '뉴스포츠 리그', body: '플라잉디스크, 피클볼, 라켓형 교구로 짧은 리그전을 구성해 참여도를 높입니다.' });
+    }
+    if (categories.has('구기던지기')) {
+      ideas.push({ title: '안전 피구 변형 게임', body: '부드러운 공을 활용해 표적 맞히기, 구역 피구, 협동 패스 미션을 진행합니다.' });
+    }
+    return ideas.slice(0, 4);
+  }, [selected]);
+
+  async function downloadEstimate(format: 'xlsx' | 'csv') {
+    if (selected.length === 0) {
+      setStatus('견적서를 만들 상품을 먼저 장바구니에 담아 주세요.');
+      return;
+    }
+    setLoading(true);
+    setLoadingMode('budget');
+    setStatus(format === 'xlsx' ? '에듀파인 견적 엑셀 파일을 만들고 있습니다.' : 'CSV 견적 파일을 만들고 있습니다.');
+    try {
+      const response = await fetch(`/api/export/estimate.${format}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: selected }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      anchor.download = `에듀파인_견적내역_${stamp}.${format}`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setStatus(format === 'xlsx' ? '에듀파인 견적 엑셀 파일을 다운로드했습니다.' : 'CSV 견적 파일을 다운로드했습니다.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
+      setLoadingMode(null);
+    }
+  }
+
   return (
     <div className="app-shell">
       {loading && loadingMode ? (
@@ -464,6 +527,55 @@ function App() {
               </article>
             ))}
           </div>
+
+          <div className="insight-grid">
+            <section className="insight-card">
+              <div className="insight-title">
+                <BarChart3 size={17} />
+                <span>쇼핑몰 비교 요약</span>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>구분</th>
+                    <th>상품 수</th>
+                    <th>금액</th>
+                    <th>평균 단가</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mallSummary.rows.map(row => (
+                    <tr key={row.mallName}>
+                      <td>{row.mallName}</td>
+                      <td>{row.count}</td>
+                      <td>{formatWon(row.total)}</td>
+                      <td>{row.averagePrice ? formatWon(row.averagePrice) : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p>{mallSummary.leader === '구성 전' ? '예산안을 구성하면 몰별 비교가 표시됩니다.' : `${mallSummary.leader} 비중이 가장 큽니다. 가격과 배송/학교 구매 편의성을 함께 확인하세요.`}</p>
+            </section>
+
+            <section className="insight-card">
+              <div className="insight-title">
+                <Lightbulb size={17} />
+                <span>수업 활용 아이디어</span>
+              </div>
+              {lessonIdeas.length ? (
+                <div className="idea-list">
+                  {lessonIdeas.map(idea => (
+                    <div key={idea.title}>
+                      <strong>{idea.title}</strong>
+                      <p>{idea.body}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p>추천안을 구성하면 교구 조합에 맞춘 수업 활용 아이디어가 표시됩니다.</p>
+              )}
+            </section>
+          </div>
         </section>
 
         <aside className="cart-panel">
@@ -513,8 +625,9 @@ function App() {
 
           <div className="export-actions">
             <button onClick={downloadMarkdown}><Download size={16} /> Markdown</button>
+            <button onClick={() => void downloadEstimate('xlsx')}><FileText size={16} /> Excel</button>
+            <button onClick={() => void downloadEstimate('csv')}><Download size={16} /> CSV</button>
             <button disabled title="rhwp/HWPX 연동 예정"><FileText size={16} /> HWPX</button>
-            <button disabled>PDF</button>
           </div>
         </aside>
       </main>
