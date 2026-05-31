@@ -146,6 +146,8 @@ const serverDir = dirname(fileURLToPath(import.meta.url));
 const estimateTemplatePath = process.env.ESTIMATE_TEMPLATE_PATH || resolve(serverDir, 'templates/edufine-estimate-template.xlsx');
 const isHosted = Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
 const mallFetchTimeoutMs = envNumber('MALL_FETCH_TIMEOUT_MS', isHosted ? 3000 : 9000);
+const teachermallFetchTimeoutMs = envNumber('TEACHERMALL_FETCH_TIMEOUT_MS', mallFetchTimeoutMs);
+const iscreamFetchTimeoutMs = envNumber('ISCREAM_FETCH_TIMEOUT_MS', isHosted ? 7500 : Math.max(mallFetchTimeoutMs, 12000));
 const geminiIntentTimeoutMs = envNumber('GEMINI_INTENT_TIMEOUT_MS', isHosted ? 4500 : 12000);
 const geminiRecommendTimeoutMs = envNumber('GEMINI_RECOMMEND_TIMEOUT_MS', isHosted ? 2500 : 15000);
 const broadQueryLimit = envNumber('BROAD_QUERY_LIMIT', isHosted ? 3 : 10);
@@ -538,16 +540,31 @@ function sortProducts(items: Product[], sort: SortOption, query: string): Produc
   });
 }
 
-async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+async function fetchJson<T>(url: string, init: RequestInit = {}, timeoutMs = mallFetchTimeoutMs): Promise<T> {
   const response = await fetchWithTimeout(url, {
     ...init,
     headers: {
       ...commonHeaders,
       ...(init.headers || {}),
     },
-  }, mallFetchTimeoutMs);
+  }, timeoutMs);
   if (!response.ok) throw new Error(`${response.status} ${response.statusText} ${url}`);
   return response.json() as Promise<T>;
+}
+
+async function fetchJsonWithRetry<T>(url: string, init: RequestInit = {}, options: { timeoutMs: number; attempts: number; label: string }): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
+    try {
+      return await fetchJson<T>(url, init, options.timeoutMs);
+    } catch (error) {
+      lastError = error;
+      if (attempt < options.attempts) {
+        await new Promise(resolve => setTimeout(resolve, 180 * attempt));
+      }
+    }
+  }
+  throw new Error(`${options.label} failed after ${options.attempts} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -652,7 +669,7 @@ async function searchTeachermall(query: string, options: SearchOptions): Promise
 
   const raw = await fetchJson<any>(`${teacherBaseUrl}/goods/api_retrieval?${params.toString()}`, {
     headers: { Referer: `${teacherBaseUrl}/` },
-  });
+  }, teachermallFetchTimeoutMs);
   const items = raw?.success && raw.data?.items ? raw.data.items.map(mapTeachermallItem).slice(0, limit) : [];
   cacheSet(cacheKey, items);
   return items;
@@ -684,7 +701,7 @@ async function searchIscream(query: string, options: SearchOptions): Promise<Pro
     kcCertOnly: '',
   };
 
-  const raw = await fetchJson<any>(`${iscreamApiUrl}/api/goods/v1/search/product`, {
+  const raw = await fetchJsonWithRetry<any>(`${iscreamApiUrl}/api/goods/v1/search/product`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -693,6 +710,10 @@ async function searchIscream(query: string, options: SearchOptions): Promise<Pro
       Referer: `${iscreamSiteUrl}/`,
     },
     body: JSON.stringify(body),
+  }, {
+    timeoutMs: iscreamFetchTimeoutMs,
+    attempts: isHosted ? 2 : 1,
+    label: `iscream search "${query}"`,
   });
 
   const items = (raw.payload?.searchDataList || [])
@@ -717,17 +738,47 @@ async function searchProducts(query: string, options: SearchOptions): Promise<Pr
 
   for (const searchQuery of queries) {
     if (source === 'all' || source === 'teachermall') {
-      jobs.push(searchTeachermall(searchQuery, { ...options, limit: fetchLimit }).catch(() => []));
+      jobs.push(searchTeachermall(searchQuery, { ...options, limit: fetchLimit }).catch(error => {
+        console.warn(`[Teachermall] search failed for "${searchQuery}":`, error instanceof Error ? error.message : String(error));
+        return [];
+      }));
     }
     if (source === 'all' || source === 'iscream') {
-      jobs.push(searchIscream(searchQuery, { ...options, limit: fetchLimit }).catch(() => []));
+      jobs.push(searchIscream(searchQuery, { ...options, limit: fetchLimit }).catch(error => {
+        console.warn(`[i-Scream Mall] search failed for "${searchQuery}":`, error instanceof Error ? error.message : String(error));
+        return [];
+      }));
     }
   }
 
   const merged = (await Promise.all(jobs)).flat();
   const scoped = isSportsQuery(query) ? merged.filter(isSportsProduct) : merged;
   const deduped = Array.from(new Map(scoped.map(item => [`${item.mall}:${item.goods_seq}`, item])).values());
-  return sortProducts(deduped, sort, query).slice(0, limit);
+  const sorted = sortProducts(deduped, sort, query);
+  return source === 'all' ? balancedMallResults(sorted, limit) : sorted.slice(0, limit);
+}
+
+function balancedMallResults(items: Product[], limit: number): Product[] {
+  const teachermall = items.filter(item => item.mall === 'teachermall');
+  const iscream = items.filter(item => item.mall === 'iscream');
+  if (teachermall.length === 0 || iscream.length === 0) return items.slice(0, limit);
+
+  const result: Product[] = [];
+  const seen = new Set<string>();
+  const push = (item: Product | undefined) => {
+    if (!item) return;
+    const key = candidateKey(item);
+    if (seen.has(key) || result.length >= limit) return;
+    seen.add(key);
+    result.push(item);
+  };
+  const rounds = Math.max(teachermall.length, iscream.length);
+  for (let index = 0; index < rounds && result.length < limit; index += 1) {
+    push(teachermall[index]);
+    push(iscream[index]);
+  }
+  for (const item of items) push(item);
+  return result;
 }
 
 function useCaseForProduct(item: Product, purpose: string): string {
