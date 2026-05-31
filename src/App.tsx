@@ -627,7 +627,6 @@ function App() {
             <button onClick={downloadMarkdown}><Download size={16} /> Markdown</button>
             <button onClick={() => void downloadEstimate('xlsx')}><FileText size={16} /> Excel</button>
             <button onClick={() => void downloadEstimate('csv')}><Download size={16} /> CSV</button>
-            <button disabled title="rhwp/HWPX 연동 예정"><FileText size={16} /> HWPX</button>
           </div>
         </aside>
       </main>

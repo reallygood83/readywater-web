@@ -15,7 +15,6 @@ Readywater Web is a local browser UI for searching Teachermall and i-Scream Mall
 - Markdown report download from the selected budget cart.
 - Edufine-ready Excel estimate download using `/Users/moon/Downloads/에듀파인_견적양식_20260531.xlsx`.
 - CSV estimate download with the same `내용, 규격, 수량, 단가` columns.
-- HWPX/PDF export buttons reserved for the next document pipeline.
 
 ## Local Development
 
@@ -68,12 +67,12 @@ Gemini can only select from retrieved candidate products. The server validates m
 
 ## Document Export Direction
 
-The current app exports Markdown. The HWPX button is intentionally present but disabled. The intended next step is:
+The current app exports Markdown, CSV, and Edufine-ready Excel estimates. The intended next document step is:
 
 1. Generate a structured report JSON from the selected cart.
 2. Render Markdown/HTML preview in the web UI.
-3. Add HWPX generation or preview through `edwardkim/rhwp`.
-4. Keep PDF export as a server-side render path after HWPX structure is stable.
+3. Add HWPX generation or preview through `edwardkim/rhwp` only when the export path is fully wired.
+4. Keep PDF export as a server-side render path after the report structure is stable.
 
 ## Verification
 
