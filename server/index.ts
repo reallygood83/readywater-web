@@ -1,4 +1,5 @@
 import express from 'express';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import ExcelJS from 'exceljs';
@@ -137,6 +138,8 @@ const app = express();
 const PORT = Number(process.env.PORT || 5191);
 const geminiApiKey = process.env.GEMINI_API_KEY || '';
 const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const appPassword = process.env.READYWATER_PASSWORD || '';
+const sessionSecret = process.env.READYWATER_SESSION_SECRET || randomBytes(32).toString('hex');
 const estimateTemplatePath = '/Users/moon/Downloads/에듀파인_견적양식_20260531.xlsx';
 
 app.use(express.json({ limit: '1mb' }));
@@ -153,6 +156,56 @@ const commonHeaders = {
 };
 
 const cache = new Map<string, { expires: number; data: unknown }>();
+const sessionTtlMs = 1000 * 60 * 60 * 12;
+
+function hashText(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function safeEqualText(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function parseCookies(cookieHeader = ''): Record<string, string> {
+  return Object.fromEntries(cookieHeader
+    .split(';')
+    .map(part => part.trim())
+    .filter(Boolean)
+    .map(part => {
+      const separator = part.indexOf('=');
+      if (separator === -1) return [part, ''];
+      return [part.slice(0, separator), decodeURIComponent(part.slice(separator + 1))];
+    }));
+}
+
+function sessionToken(): string {
+  const expires = Date.now() + sessionTtlMs;
+  const signature = hashText(`${expires}:${sessionSecret}:${appPassword}`);
+  return `${expires}.${signature}`;
+}
+
+function isValidSession(cookieHeader?: string): boolean {
+  if (!appPassword) return true;
+  const token = parseCookies(cookieHeader).readywater_session;
+  if (!token) return false;
+  const [expiresRaw, signature] = token.split('.');
+  const expires = Number(expiresRaw);
+  if (!Number.isFinite(expires) || expires < Date.now() || !signature) return false;
+  const expected = hashText(`${expires}:${sessionSecret}:${appPassword}`);
+  return safeEqualText(signature, expected);
+}
+
+function sessionCookie(token: string): string {
+  return [
+    `readywater_session=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${Math.floor(sessionTtlMs / 1000)}`,
+  ].join('; ');
+}
 
 function cacheGet<T>(key: string): T | null {
   const hit = cache.get(key);
@@ -1028,8 +1081,43 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     service: 'readywater-web',
     llm: geminiApiKey ? { provider: 'gemini', model: geminiModel } : { provider: 'rules' },
+    auth: { enabled: Boolean(appPassword) },
     time: new Date().toISOString(),
   });
+});
+
+app.get('/api/auth/status', (req, res) => {
+  res.json({
+    enabled: Boolean(appPassword),
+    authenticated: isValidSession(req.headers.cookie),
+  });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  if (!appPassword) {
+    res.json({ authenticated: true, enabled: false });
+    return;
+  }
+  const password = String(req.body.password || '');
+  if (!safeEqualText(hashText(password), hashText(appPassword))) {
+    res.status(401).json({ error: '비밀번호가 올바르지 않습니다.' });
+    return;
+  }
+  res.setHeader('Set-Cookie', sessionCookie(sessionToken()));
+  res.json({ authenticated: true, enabled: true });
+});
+
+app.post('/api/auth/logout', (_req, res) => {
+  res.setHeader('Set-Cookie', 'readywater_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+  res.json({ authenticated: false });
+});
+
+app.use('/api', (req, res, next) => {
+  if (isValidSession(req.headers.cookie)) {
+    next();
+    return;
+  }
+  res.status(401).json({ error: 'Readywater 비밀번호 인증이 필요합니다.' });
 });
 
 app.get('/api/search', async (req, res) => {

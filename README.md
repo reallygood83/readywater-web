@@ -15,6 +15,7 @@ Readywater Web is a local browser UI for searching Teachermall and i-Scream Mall
 - Markdown report download from the selected budget cart.
 - Edufine-ready Excel estimate download using `/Users/moon/Downloads/에듀파인_견적양식_20260531.xlsx`.
 - CSV estimate download with the same `내용, 규격, 수량, 단가` columns.
+- Optional password gate for protecting free API usage.
 
 ## Local Development
 
@@ -23,6 +24,8 @@ npm install
 cp .env.example .env
 npm run dev
 ```
+
+Set `READYWATER_PASSWORD` in `.env` to require a password before users can search or use AI/export APIs. Keep `GEMINI_API_KEY`, `READYWATER_PASSWORD`, and `READYWATER_SESSION_SECRET` out of GitHub.
 
 Open:
 
@@ -39,6 +42,9 @@ http://127.0.0.1:5191
 ## API Surface
 
 - `GET /api/health`
+- `GET /api/auth/status`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
 - `GET /api/search?query=...&source=all&sort=relevance&limit=18`
 - `GET /api/compare?query=...`
 - `POST /api/budget-kit`
@@ -73,6 +79,14 @@ The current app exports Markdown, CSV, and Edufine-ready Excel estimates. The in
 2. Render Markdown/HTML preview in the web UI.
 3. Add HWPX generation or preview through `edwardkim/rhwp` only when the export path is fully wired.
 4. Keep PDF export as a server-side render path after the report structure is stable.
+
+## Deployment Direction
+
+The current local architecture is Vite plus an Express API. For hosted use:
+
+- Vercel: move the Express API into a Vercel Node.js Function or split endpoints under `api/`, then set `GEMINI_API_KEY`, `READYWATER_PASSWORD`, and `READYWATER_SESSION_SECRET` as Vercel environment variables.
+- Firebase: use Firebase Hosting for the web UI and Cloud Functions for the Express API.
+- Firestore: use it for user accounts, password/member records, search logs, usage metering, saved carts, and subscription state. It is not a replacement for the server API that protects the Gemini key.
 
 ## Verification
 

@@ -1,12 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
   BookOpenCheck,
   Download,
   ExternalLink,
   FileSpreadsheet,
+  Lock,
   Loader2,
   Lightbulb,
+  LogOut,
   ShieldCheck,
   Search,
   Settings2,
@@ -57,6 +59,11 @@ function signalText(product: Product) {
 }
 
 function App() {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authEnabled, setAuthEnabled] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
   const [grade, setGrade] = useState('6학년');
   const [purpose, setPurpose] = useState('체육교육');
   const [budget, setBudget] = useState(1_000_000);
@@ -87,6 +94,54 @@ function App() {
     };
   }, [budget, selected]);
 
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const response = await fetch('/api/auth/status');
+        const data = await response.json() as { enabled: boolean; authenticated: boolean };
+        setAuthEnabled(data.enabled);
+        setAuthenticated(data.authenticated);
+      } catch {
+        setAuthError('인증 상태를 확인하지 못했습니다. 서버 실행 상태를 확인해 주세요.');
+      } finally {
+        setAuthChecked(true);
+      }
+    }
+    void checkAuth();
+  }, []);
+
+  function handleUnauthorized(response: Response): boolean {
+    if (response.status !== 401) return false;
+    setAuthenticated(false);
+    setAuthEnabled(true);
+    setStatus('비밀번호 인증이 필요합니다.');
+    return true;
+  }
+
+  async function login(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthError('');
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      setAuthenticated(true);
+      setPassword('');
+      setStatus('인증되었습니다. 검색을 시작하세요.');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
+    setAuthenticated(false);
+    setPassword('');
+  }
+
   async function runSearch(nextQuery = query) {
     const searchQuery = nextQuery.trim() || [grade, purpose, '교구'].filter(Boolean).join(' ');
     setLoading(true);
@@ -100,6 +155,7 @@ function App() {
         limit: '18',
       });
       const response = await fetch(`/api/search?${params.toString()}`);
+      if (handleUnauthorized(response)) return;
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json() as { items: Product[] };
       setResults(data.items);
@@ -130,6 +186,7 @@ function App() {
           needs: [[grade, purpose].join(' '), ...seedNeeds],
         }),
       });
+      if (handleUnauthorized(response)) return;
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json() as BudgetKitResponse;
       setKit(data);
@@ -160,6 +217,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
       });
+      if (handleUnauthorized(response)) return;
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json() as {
         parser: 'gemini' | 'rules';
@@ -304,6 +362,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: selected }),
       });
+      if (handleUnauthorized(response)) return;
       if (!response.ok) throw new Error(await response.text());
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -368,7 +427,41 @@ function App() {
             <ShoppingCart size={16} /> 예산구성
           </button>
         </nav>
+        {authEnabled ? (
+          <button className="logout-button" onClick={() => void logout()}>
+            <LogOut size={15} />
+            로그아웃
+          </button>
+        ) : null}
       </header>
+
+      {!authChecked ? (
+        <main className="auth-screen">
+          <div className="auth-card">
+            <Loader2 className="spin" size={22} />
+            <strong>접근 권한을 확인하고 있습니다</strong>
+          </div>
+        </main>
+      ) : authEnabled && !authenticated ? (
+        <main className="auth-screen">
+          <form className="auth-card" onSubmit={login}>
+            <span className="auth-mark"><Lock size={22} /></span>
+            <div>
+              <strong>Readywater 비밀번호</strong>
+              <p>무료 API 사용량 보호를 위해 인증된 사용자만 검색할 수 있습니다.</p>
+            </div>
+            <input
+              type="password"
+              value={password}
+              onChange={event => setPassword(event.target.value)}
+              autoFocus
+              aria-label="Readywater 비밀번호"
+            />
+            {authError ? <p className="auth-error">{authError}</p> : null}
+            <button type="submit" disabled={!password.trim()}>입장하기</button>
+          </form>
+        </main>
+      ) : (
 
       <main className="workspace">
         <aside className="filter-panel">
@@ -635,6 +728,7 @@ function App() {
           </div>
         </aside>
       </main>
+      )}
     </div>
   );
 }

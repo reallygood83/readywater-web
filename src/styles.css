@@ -184,6 +184,79 @@ button {
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
 }
 
+.logout-button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #dbe4ec;
+  border-radius: 7px;
+  padding: 0 12px;
+  color: #405164;
+  background: #ffffff;
+  font-weight: 750;
+}
+
+.auth-screen {
+  min-height: calc(100vh - 72px);
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 16px;
+  padding: 28px;
+  border: 1px solid #dbe4ec;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 55px rgba(15, 23, 42, 0.09);
+}
+
+.auth-mark {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0e9f8f, #2563eb);
+}
+
+.auth-card strong {
+  display: block;
+  font-size: 21px;
+}
+
+.auth-card p {
+  margin: 6px 0 0;
+  color: #5f6f7e;
+}
+
+.auth-card button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 7px;
+  color: #ffffff;
+  background: #0e9f8f;
+  font-weight: 800;
+}
+
+.auth-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.auth-error {
+  padding: 10px 12px;
+  border-radius: 7px;
+  color: #9f1239;
+  background: #fff1f2;
+  font-size: 13px;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: 280px minmax(620px, 1fr) 360px;
