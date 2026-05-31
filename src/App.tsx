@@ -35,7 +35,12 @@ const sortOptions: Array<{ value: SortOption; label: string }> = [
   { value: 'newest', label: '최신순' },
 ];
 
-const seedNeeds = ['피구공', '원마커', '팀조끼', '라바콘', '플라잉디스크'];
+const topicNeedRules: Array<{ pattern: RegExp; needs: string[] }> = [
+  { pattern: /체육|운동|스포츠|놀이체육/, needs: ['피구공', '원마커', '팀조끼', '라바콘', '플라잉디스크'] },
+  { pattern: /미술|만들기|공예/, needs: ['색종이', '클레이', '물감', '도화지', '공예 키트'] },
+  { pattern: /과학|실험/, needs: ['실험 키트', '관찰', '자석', '전기 회로', '현미경'] },
+  { pattern: /학급|보상|선물/, needs: ['학급 보상', '칭찬 스티커', '간식', '선물', '쿠폰'] },
+];
 
 const loadingSteps = [
   '자연어 요청 해석',
@@ -62,6 +67,10 @@ function signalText(product: Product) {
 function productTags(product: Product) {
   const text = [product.goods_name, product.category_path || '', product.properties || ''].join(' ');
   const tags = new Set<string>();
+  if (/미술|공예|만들기|도화|색종이|물감|클레이/.test(text)) tags.add('미술');
+  if (/색종이|도화지|스케치북|한지/.test(text)) tags.add('종이');
+  if (/물감|마카|마커펜|싸인펜|사인펜|색연필|붓/.test(text)) tags.add('채색');
+  if (/클레이|점토|공예|꾸미기|비즈|스티커/.test(text)) tags.add('공예');
   if (/체육|스포츠|운동|놀이체육/.test(text)) tags.add('체육');
   if (/피구|공\b|스펀지|솜털|빈백/.test(text)) tags.add('구기');
   if (/안전|소프트|말랑/.test(text)) tags.add('안전');
@@ -70,6 +79,11 @@ function productTags(product: Product) {
   if (/기록|타이머|점수|스코어/.test(text)) tags.add('기록');
   if (/순발력|민첩|사다리/.test(text)) tags.add('훈련');
   return Array.from(tags).slice(0, 3);
+}
+
+function suggestedNeedsFor(purpose: string, grade: string) {
+  const text = `${grade} ${purpose}`;
+  return topicNeedRules.find(rule => rule.pattern.test(text))?.needs || ['교구', '준비물', '활동 키트', '수업 자료', '소모품'];
 }
 
 function popularityValue(product: Product) {
@@ -108,6 +122,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<'search' | 'budget'>('search');
   const [resultView, setResultView] = useState<'table' | 'card'>('table');
   const [hideSoldOut, setHideSoldOut] = useState(false);
+  const seedNeeds = useMemo(() => suggestedNeedsFor(purpose, grade), [grade, purpose]);
 
   const modalSteps = loadingMode === 'prompt'
     ? loadingSteps
@@ -212,10 +227,11 @@ function App() {
   }
 
   async function buildKit() {
+    const candidateSource = visibleResults.length ? visibleResults : results;
     setLoading(true);
     setLoadingMode('budget');
     setActiveTab('budget');
-    setStatus('예산에 맞는 조합을 구성하고 있습니다.');
+    setStatus(candidateSource.length ? '현재 검색 결과를 바탕으로 예산안을 구성하고 있습니다.' : '예산에 맞는 조합을 구성하고 있습니다.');
     try {
       const response = await fetch('/api/budget-kit', {
         method: 'POST',
@@ -226,7 +242,8 @@ function App() {
           maxBudget: budget,
           itemCount: 12,
           source,
-          needs: [[grade, purpose].join(' '), ...seedNeeds],
+          needs: [query.trim() || [grade, purpose, '교구'].filter(Boolean).join(' '), ...seedNeeds],
+          candidates: candidateSource,
         }),
       });
       if (handleUnauthorized(response)) return;
@@ -235,7 +252,7 @@ function App() {
       setKit(data);
       setRecommendation(null);
       setSelected(data.items);
-      setResults(data.allCandidates);
+      setResults(current => current.length ? current : data.allCandidates);
       setStatus(`예산안 ${formatWon(data.totalCost)}을 구성했습니다. 남은 예산은 ${formatWon(data.remaining)}입니다.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));

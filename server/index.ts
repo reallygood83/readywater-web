@@ -18,6 +18,14 @@ interface SearchOptions {
   maxExpandedQueries?: number;
 }
 
+const topicNeedRules: Array<{ pattern: RegExp; purpose: string; needs: string[] }> = [
+  { pattern: /체육|운동|스포츠|놀이체육/, purpose: '체육교육', needs: ['피구공', '원마커', '팀조끼', '라바콘', '플라잉디스크', '뉴스포츠'] },
+  { pattern: /과학|실험/, purpose: '과학교육', needs: ['실험 키트', '관찰', '자석', '전기 회로', '현미경'] },
+  { pattern: /미술|만들기|공예/, purpose: '미술교육', needs: ['색종이', '클레이', '물감', '도화지', '공예 키트', '마카펜', '스케치북'] },
+  { pattern: /학급|보상|선물/, purpose: '학급운영', needs: ['학급 보상', '칭찬 스티커', '간식', '선물', '쿠폰'] },
+  { pattern: /안전|생활안전|교통안전/, purpose: '안전교육', needs: ['안전교육', '교통안전', '응급처치', '생활안전'] },
+];
+
 interface Product {
   goods_seq: string;
   goods_name: string;
@@ -295,12 +303,11 @@ function meaningfulTokens(query: string): string[] {
 
 function expandBroadQuery(query: string): string[] {
   const normalized = normalize(query);
-  const sportsTerms = ['피구공', '원마커', '팀조끼', '라바콘', '플라잉디스크', '뉴스포츠'];
-  const hasSportsIntent = /체육|운동|놀이체육|스포츠/.test(normalized);
-  const hasSpecificSportsTerm = sportsTerms.some(term => normalized.includes(term));
+  const matchedTopic = topicNeedRules.find(rule => rule.pattern.test(normalized));
+  if (!matchedTopic) return [query];
 
-  if (hasSportsIntent && !hasSpecificSportsTerm) return sportsTerms;
-  return [query];
+  const hasSpecificTerm = matchedTopic.needs.some(term => normalized.includes(normalize(term)));
+  return hasSpecificTerm ? [query] : [query, ...matchedTopic.needs];
 }
 
 function isSportsQuery(query: string): boolean {
@@ -340,18 +347,11 @@ function parseNaturalPrompt(prompt: string): ParsedPrompt {
     maxBudget = 1_000_000;
   }
 
-  const topicMap: Array<[RegExp, string, string[]]> = [
-    [/체육|운동|스포츠|놀이체육/, '체육교육', ['피구공', '원마커', '팀조끼', '라바콘', '플라잉디스크', '뉴스포츠']],
-    [/과학|실험/, '과학교육', ['실험 키트', '관찰', '자석', '전기 회로', '현미경']],
-    [/미술|만들기|공예/, '미술교육', ['색종이', '클레이', '물감', '도화지', '공예 키트']],
-    [/학급|보상|선물/, '학급운영', ['학급 보상', '칭찬 스티커', '간식', '선물', '쿠폰']],
-    [/안전|생활안전|교통안전/, '안전교육', ['안전교육', '교통안전', '응급처치', '생활안전']],
-  ];
-  const matchedTopic = topicMap.find(([pattern]) => pattern.test(normalized));
+  const matchedTopic = topicNeedRules.find(rule => rule.pattern.test(normalized));
   const explicitNeeds = ['피구공', '원마커', '팀조끼', '라바콘', '플라잉디스크', '빈백', '피클볼', '스파이크볼', '호루라기']
     .filter(need => normalized.includes(normalize(need)));
-  const purpose = matchedTopic?.[1] || prompt.replace(/\d+(?:\.\d+)?\s*(만원|천원|원)/g, '').slice(0, 24).trim() || '수업 준비';
-  const needs = explicitNeeds.length > 0 ? explicitNeeds : matchedTopic?.[2] || [purpose, `${purpose} 교구`, `${purpose} 준비물`];
+  const purpose = matchedTopic?.purpose || prompt.replace(/\d+(?:\.\d+)?\s*(만원|천원|원)/g, '').slice(0, 24).trim() || '수업 준비';
+  const needs = explicitNeeds.length > 0 ? explicitNeeds : matchedTopic?.needs || [purpose, `${purpose} 교구`, `${purpose} 준비물`];
 
   return {
     grade: gradeMatch ? `${gradeMatch[1]}학년` : undefined,
@@ -419,8 +419,11 @@ function strengthenIntent(intent: ParsedPrompt, prompt: string): ParsedPrompt {
 
 function categoryForProduct(item: Product): string {
   const text = productText(item);
+  if (/색종이|종이접기|도화지|한지|습자지|스케치북|캔버스/.test(text)) return '종이도화';
+  if (/물감|마카|마커펜|싸인펜|사인펜|색연필|크레파스|붓|파스텔/.test(text)) return '채색도구';
+  if (/클레이|점토|공예|만들기|꾸미기|비즈|폼폼|스티커/.test(text)) return '공예만들기';
   if (/팀조끼|띠조끼|게임용 조끼/.test(text)) return '팀구분';
-  if (/콘|마커|라바콘|삼각콘|고깔/.test(text)) return '공간표시';
+  if (/원마커|라인마커|마킹콘|라바콘|삼각콘|고깔/.test(text)) return '공간표시';
   if (/호루라기|펌프|타이머|스코어|점수|안전/.test(text)) return '안전운영';
   if (/스파이크볼|피클볼|라켓|민턴|인디아카|플라잉디스크|디스크|뉴스포츠/.test(text)) return '뉴스포츠';
   if (/피구|축구|농구|배구|공\b|볼\b|빈백|콩주머니/.test(text)) return '구기던지기';
@@ -437,6 +440,9 @@ function popularitySignal(item: Product): number {
 
 function valueScore(item: Product, query: string): number {
   const categoryBoost: Record<string, number> = {
+    종이도화: 36,
+    채색도구: 35,
+    공예만들기: 34,
     구기던지기: 35,
     공간표시: 34,
     팀구분: 32,
@@ -793,12 +799,26 @@ function balancedMallResults(items: Product[], limit: number): Product[] {
 
 function useCaseForProduct(item: Product, purpose: string): string {
   const text = productText(item);
+  if (/색종이|종이접기|도화지|한지|스케치북/.test(text)) return `${purpose}에서 표현 활동, 밑그림, 콜라주, 모둠 작품 제작에 사용`;
+  if (/물감|마카|마커펜|싸인펜|사인펜|색연필|크레파스|붓/.test(text)) return `${purpose}에서 채색, 선 표현, 포스터 제작, 작품 마무리에 사용`;
+  if (/클레이|점토|공예|만들기|꾸미기|비즈|폼폼|스티커/.test(text)) return `${purpose}에서 입체 표현, 만들기, 꾸미기, 협동 작품 제작에 사용`;
   if (/피구|공\b|스펀지공|솜털공|빈백/.test(text)) return `${purpose}에서 던지기, 받기, 목표물 맞히기, 팀 대항 활동에 사용`;
   if (/콘|마커|라바콘|삼각콘/.test(text)) return `${purpose} 활동장 구획, 코스 설계, 순환 스테이션 표시`;
   if (/조끼|팀/.test(text)) return `${purpose} 팀 구분, 역할 배정, 경기 운영`;
   if (/라켓|민턴|피클볼|스파이크볼|디스크/.test(text)) return `${purpose} 네트형/필드형 게임과 협동 도전 과제`;
   if (/호루라기|전자/.test(text)) return `${purpose} 안전 신호, 시작/정지 신호, 이동 통제`;
   return `${purpose} 수업의 준비 운동, 기능 연습, 협동 게임에 활용`;
+}
+
+function defaultNeedsFor(purpose: string, grade?: string): string[] {
+  const text = normalize([grade || '', purpose].join(' '));
+  const matchedTopic = topicNeedRules.find(rule => rule.pattern.test(text));
+  const base = [
+    [grade, purpose, '교구'].filter(Boolean).join(' '),
+    `${purpose} 교구`,
+    `${purpose} 준비물`,
+  ];
+  return [...new Set([...base, ...(matchedTopic?.needs || [])])].filter(Boolean);
 }
 
 async function buildBudgetKit(params: {
@@ -808,31 +828,36 @@ async function buildBudgetKit(params: {
   itemCount: number;
   source: MallSource;
   needs?: string[];
+  candidates?: Product[];
 }): Promise<{ items: BudgetLine[]; totalCost: number; remaining: number; allCandidates: Product[]; needs: string[] }> {
   const baseNeeds = params.needs?.length
     ? params.needs
-    : [
-      [params.grade, params.purpose].filter(Boolean).join(' '),
-      `${params.purpose} 교구`,
-      `${params.purpose} 준비물`,
-      '피구공 원마커 팀조끼 라바콘 플라잉디스크',
-    ];
-  const candidates = (await Promise.all(
-    baseNeeds.map(need => searchProducts(need, {
-      source: params.source,
-      limit: 12,
-      sort: 'relevance',
-      maxPrice: params.maxBudget,
-    })),
-  )).flat();
+    : defaultNeedsFor(params.purpose, params.grade);
+  const candidates = params.candidates?.length
+    ? params.candidates
+    : (await Promise.all(
+      baseNeeds.map(need => searchProducts(need, {
+        source: params.source,
+        limit: 12,
+        sort: 'relevance',
+        maxPrice: params.maxBudget,
+      })),
+    )).flat();
 
   const tokens = meaningfulTokens(baseNeeds.join(' '));
-  const unique = Array.from(new Map(candidates.map(item => [`${item.mall}:${item.goods_seq}`, item])).values())
+  const uniqueCandidates = Array.from(new Map(candidates.map(item => [`${item.mall}:${item.goods_seq}`, item])).values())
     .filter(item => {
-      if (item.price <= 0) return false;
+      if (item.price <= 0 || item.price > params.maxBudget) return false;
+      if (params.candidates?.length) return true;
       const haystack = productText(item);
       return tokens.length === 0 || tokens.some(token => haystack.includes(token));
-    })
+    });
+  const tokenFiltered = uniqueCandidates.filter(item => {
+    if (params.candidates?.length) return true;
+    const haystack = productText(item);
+    return tokens.length === 0 || tokens.some(token => haystack.includes(token));
+  });
+  const unique = (tokenFiltered.length > 0 ? tokenFiltered : uniqueCandidates)
     .sort((a, b) => {
       const aValue = valueScore(a, baseNeeds.join(' ')) / Math.max(a.price, 500);
       const bValue = valueScore(b, baseNeeds.join(' ')) / Math.max(b.price, 500);
@@ -841,7 +866,7 @@ async function buildBudgetKit(params: {
 
   const lines: BudgetLine[] = [];
   let totalCost = 0;
-  const categoryTargets = ['구기던지기', '공간표시', '팀구분', '뉴스포츠', '안전운영'];
+  const categoryTargets = ['종이도화', '채색도구', '공예만들기', '구기던지기', '공간표시', '팀구분', '뉴스포츠', '안전운영', '기타'];
   const orderedCandidates = [
     ...categoryTargets.flatMap(category => unique.filter(item => categoryForProduct(item) === category).slice(0, 2)),
     ...unique,
@@ -959,6 +984,9 @@ function sanitizeRecommendation(raw: unknown, candidates: Product[], prompt: str
 
 function maxUsefulQuantity(item: BudgetLine): number {
   const category = item.category || categoryForProduct(item);
+  if (category === '종이도화') return item.price < 3000 ? 60 : item.price < 10000 ? 20 : 8;
+  if (category === '채색도구') return item.price < 3000 ? 40 : item.price < 15000 ? 12 : 4;
+  if (category === '공예만들기') return item.price < 5000 ? 30 : item.price < 20000 ? 10 : 4;
   if (category === '팀구분') return 30;
   if (category === '공간표시') return item.price < 3000 ? 36 : 8;
   if (category === '구기던지기') return item.price < 5000 ? 20 : item.price < 15000 ? 10 : 6;
@@ -1098,6 +1126,9 @@ function fallbackRecommendation(candidates: Product[], intent: ParsedPrompt): Re
 function categoryLabel(category: string): string {
   const labels: Record<string, string> = {
     구기던지기: '공 조작/던지기',
+    종이도화: '종이/도화 재료',
+    채색도구: '채색/표현 도구',
+    공예만들기: '공예/만들기 재료',
     공간표시: '공간 표시/코스 구성',
     팀구분: '팀 구분/협동 활동',
     뉴스포츠: '뉴스포츠/전략 게임',
@@ -1110,6 +1141,9 @@ function categoryLabel(category: string): string {
 function categoryPurpose(category: string): string {
   const purposes: Record<string, string> = {
     구기던지기: '던지기, 받기, 피하기, 목표물 맞히기처럼 신체 조절과 게임 이해를 함께 다룰 수 있습니다.',
+    종이도화: '개인 표현, 콜라주, 모둠 포스터, 계절 작품 제작에 바로 투입할 수 있습니다.',
+    채색도구: '색 표현, 선 표현, 포스터 제작, 작품 마무리 활동을 안정적으로 운영할 수 있습니다.',
+    공예만들기: '입체 표현, 꾸미기, 협동 작품 제작처럼 손으로 조작하는 활동을 풍부하게 만들 수 있습니다.',
     공간표시: '모둠별 활동 구역, 이동 동선, 출발선과 안전선을 빠르게 만들 수 있습니다.',
     팀구분: '팀 편성과 역할 교대가 명확해져 대기 시간을 줄이고 협동 활동을 운영하기 쉽습니다.',
     뉴스포츠: '기존 구기 종목보다 진입 장벽이 낮아 전략 수립, 의사소통, 페어플레이 지도가 쉽습니다.',
@@ -1179,6 +1213,41 @@ function uniqueTextList(items: string[]): string[] {
     if (!normalized || seen.has(normalized)) return [];
     seen.add(normalized);
     return [item];
+  });
+}
+
+function sanitizeClientProducts(value: unknown): Product[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(item => {
+    if (!item || typeof item !== 'object') return [];
+    const data = item as Partial<Product>;
+    const mall = data.mall === 'teachermall' || data.mall === 'iscream' ? data.mall : undefined;
+    const goodsSeq = data.goods_seq ? String(data.goods_seq) : '';
+    const goodsName = data.goods_name ? String(data.goods_name) : '';
+    const price = Number(data.price);
+    const shopUrl = data.shop_url ? String(data.shop_url) : '';
+    if (!mall || !goodsSeq || !goodsName || !Number.isFinite(price) || price <= 0 || !shopUrl) return [];
+    return [{
+      goods_seq: goodsSeq,
+      goods_name: goodsName,
+      price,
+      consumer_price: Number(data.consumer_price) || undefined,
+      image_url: data.image_url ? String(data.image_url) : '',
+      shop_url: shopUrl,
+      mall,
+      mall_name: data.mall_name ? String(data.mall_name) : mall === 'teachermall' ? '티처몰' : '아이스크림몰',
+      provider_name: data.provider_name ? String(data.provider_name) : undefined,
+      purchase_count: Number(data.purchase_count) || undefined,
+      wish_count: Number(data.wish_count) || undefined,
+      review_count: Number(data.review_count) || undefined,
+      average_rating: Number(data.average_rating) || undefined,
+      discount_rate: Number(data.discount_rate) || undefined,
+      category_path: data.category_path ? String(data.category_path) : undefined,
+      sale_status: data.sale_status ? String(data.sale_status) : undefined,
+      badges: Array.isArray(data.badges) ? data.badges.map(String).filter(Boolean).slice(0, 8) : undefined,
+      properties: data.properties ? String(data.properties) : undefined,
+      regist_date: data.regist_date ? String(data.regist_date) : undefined,
+    }];
   });
 }
 
@@ -1449,6 +1518,7 @@ app.post('/api/budget-kit', async (req, res) => {
       itemCount: numberParam(req.body.itemCount, 10),
       source: (req.body.source as MallSource) || 'all',
       needs: Array.isArray(req.body.needs) ? req.body.needs.map(String).filter(Boolean) : undefined,
+      candidates: sanitizeClientProducts(req.body.candidates),
     });
     res.json(result);
   } catch (error) {
