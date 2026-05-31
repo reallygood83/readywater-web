@@ -89,8 +89,10 @@ The app is Vercel-ready as a Vite static frontend plus a Node.js Function that r
 - Vercel: `api/index.ts` exports the Express app, `vercel.json` rewrites `/api/*` to that function and all other paths to the Vite SPA.
 - Required Vercel environment variables: `GEMINI_API_KEY`, `GEMINI_MODEL`, `READYWATER_PASSWORD`, `READYWATER_SESSION_SECRET`.
 - Optional Vercel environment variable: `ESTIMATE_TEMPLATE_PATH`, only needed if you want to override the bundled Edufine template.
+- Optional timeout/tuning variables for serverless stability: `MALL_FETCH_TIMEOUT_MS`, `GEMINI_INTENT_TIMEOUT_MS`, `GEMINI_RECOMMEND_TIMEOUT_MS`, `BROAD_QUERY_LIMIT`, `INTENT_NEEDS_LIMIT`, `INTENT_SEARCH_LIMIT`, `INTENT_CANDIDATE_LIMIT`, `INTENT_EXPANDED_QUERY_LIMIT`.
 - Set `READYWATER_PASSWORD` in Vercel before sharing the deployment URL. Without it, the app intentionally runs without the password gate for local no-auth development.
 - Before production launch, run `vercel login`, `vercel pull --yes --environment preview`, and `vercel build --yes`, then verify `/api/auth/status`, `/api/search`, `/api/export/estimate.csv`, `/api/export/estimate.xlsx`, and one non-root frontend route.
+- If `/api/intent` returns `FUNCTION_INVOCATION_TIMEOUT`, keep the default hosted limits above or lower `INTENT_NEEDS_LIMIT` and `INTENT_EXPANDED_QUERY_LIMIT` first. The API will fall back to rule-based parsing/recommendations when Gemini or a mall API is slow.
 - Firebase: use Firebase Hosting for the web UI and Cloud Functions for the Express API.
 - Firestore: use it for user accounts, password/member records, search logs, usage metering, saved carts, and subscription state. It is not a replacement for the server API that protects the Gemini key.
 

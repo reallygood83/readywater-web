@@ -15,6 +15,7 @@ interface SearchOptions {
   minPrice?: number;
   maxPrice?: number;
   source?: MallSource;
+  maxExpandedQueries?: number;
 }
 
 interface Product {
@@ -144,6 +145,14 @@ const sessionSecret = process.env.READYWATER_SESSION_SECRET || (process.env.VERC
 const serverDir = dirname(fileURLToPath(import.meta.url));
 const estimateTemplatePath = process.env.ESTIMATE_TEMPLATE_PATH || resolve(serverDir, 'templates/edufine-estimate-template.xlsx');
 const isHosted = Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
+const mallFetchTimeoutMs = envNumber('MALL_FETCH_TIMEOUT_MS', isHosted ? 3000 : 9000);
+const geminiIntentTimeoutMs = envNumber('GEMINI_INTENT_TIMEOUT_MS', isHosted ? 4500 : 12000);
+const geminiRecommendTimeoutMs = envNumber('GEMINI_RECOMMEND_TIMEOUT_MS', isHosted ? 2500 : 15000);
+const broadQueryLimit = envNumber('BROAD_QUERY_LIMIT', isHosted ? 3 : 10);
+const intentNeedsLimit = envNumber('INTENT_NEEDS_LIMIT', isHosted ? 2 : 8);
+const intentSearchLimit = envNumber('INTENT_SEARCH_LIMIT', isHosted ? 8 : 12);
+const intentCandidateLimit = envNumber('INTENT_CANDIDATE_LIMIT', isHosted ? 18 : 24);
+const intentExpandedQueryLimit = envNumber('INTENT_EXPANDED_QUERY_LIMIT', isHosted ? 2 : 10);
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -160,6 +169,11 @@ const commonHeaders = {
 
 const cache = new Map<string, { expires: number; data: unknown }>();
 const sessionTtlMs = 1000 * 60 * 60 * 12;
+
+function envNumber(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 function hashText(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -465,14 +479,14 @@ async function parsePromptWithGemini(prompt: string, fallback: ParsedPrompt): Pr
     },
   };
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-goog-api-key': geminiApiKey,
     },
     body: JSON.stringify(body),
-  });
+  }, geminiIntentTimeoutMs);
 
   if (!response.ok) {
     throw new Error(`Gemini intent parsing failed: ${response.status} ${response.statusText}`);
@@ -525,15 +539,34 @@ function sortProducts(items: Product[], sort: SortOption, query: string): Produc
 }
 
 async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     ...init,
     headers: {
       ...commonHeaders,
       ...(init.headers || {}),
     },
-  });
+  }, mallFetchTimeoutMs);
   if (!response.ok) throw new Error(`${response.status} ${response.statusText} ${url}`);
   return response.json() as Promise<T>;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const upstreamSignal = init.signal;
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) controller.abort();
+    else upstreamSignal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function mapTeachermallItem(item: any): Product {
@@ -679,7 +712,7 @@ async function searchIscream(query: string, options: SearchOptions): Promise<Pro
 async function searchProducts(query: string, options: SearchOptions): Promise<Product[]> {
   const { source = 'all', limit = 12, sort = 'relevance' } = options;
   const fetchLimit = Math.min(30, Math.max(limit * 2, limit));
-  const queries = expandBroadQuery(query);
+  const queries = expandBroadQuery(query).slice(0, options.maxExpandedQueries || broadQueryLimit);
   const jobs: Promise<Product[]>[] = [];
 
   for (const searchQuery of queries) {
@@ -1019,7 +1052,7 @@ async function recommendWithGemini(prompt: string, intent: ParsedPrompt, candida
 
   try {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent`;
-    const response = await fetch(endpoint, {
+    const response = await fetchWithTimeout(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1065,7 +1098,7 @@ async function recommendWithGemini(prompt: string, intent: ParsedPrompt, candida
           response_mime_type: 'application/json',
         },
       }),
-    });
+    }, geminiRecommendTimeoutMs);
 
     if (!response.ok) throw new Error(`Gemini recommendation failed: ${response.status} ${response.statusText}`);
     const json = await response.json() as any;
@@ -1182,15 +1215,17 @@ app.post('/api/intent', async (req, res) => {
     }
 
     const query = [intent.grade, intent.purpose, '교구'].filter(Boolean).join(' ');
+    const searchNeeds = Array.from(new Set([query, ...intent.needs])).slice(0, intentNeedsLimit);
     const candidates = (await Promise.all(
-      [query, ...intent.needs].map(need => searchProducts(need, {
+      searchNeeds.map(need => searchProducts(need, {
         source: intent.source,
         sort: intent.sort,
-        limit: 12,
+        limit: intentSearchLimit,
         maxPrice: intent.maxBudget,
+        maxExpandedQueries: intentExpandedQueryLimit,
       })),
     )).flat();
-    const items = Array.from(new Map(candidates.map(item => [candidateKey(item), item])).values()).slice(0, 24);
+    const items = Array.from(new Map(candidates.map(item => [candidateKey(item), item])).values()).slice(0, intentCandidateLimit);
     const recommendation = intent.shouldBuildBudget
       ? await recommendWithGemini(prompt, intent, items)
       : null;
@@ -1200,7 +1235,7 @@ app.post('/api/intent', async (req, res) => {
         totalCost: recommendation.totalCost,
         remaining: recommendation.remaining,
         allCandidates: items,
-        needs: intent.needs,
+        needs: searchNeeds,
       }
       : null;
 
@@ -1209,6 +1244,7 @@ app.post('/api/intent', async (req, res) => {
       parser,
       intent,
       query,
+      searchNeeds,
       items,
       budgetKit,
       recommendation,
@@ -1225,17 +1261,19 @@ app.post('/api/recommend', async (req, res) => {
     const fallbackIntent = strengthenIntent(parseNaturalPrompt(prompt), prompt);
     const intent = strengthenIntent(await parsePromptWithGemini(prompt, fallbackIntent).catch(() => null) || fallbackIntent, prompt);
     const query = [intent.grade, intent.purpose, '교구'].filter(Boolean).join(' ');
+    const searchNeeds = Array.from(new Set([query, ...intent.needs])).slice(0, intentNeedsLimit);
     const candidates = (await Promise.all(
-      [query, ...intent.needs].map(need => searchProducts(need, {
+      searchNeeds.map(need => searchProducts(need, {
         source: intent.source,
         sort: intent.sort,
-        limit: 12,
+        limit: intentSearchLimit,
         maxPrice: intent.maxBudget,
+        maxExpandedQueries: intentExpandedQueryLimit,
       })),
     )).flat();
     const uniqueCandidates = Array.from(new Map(candidates.map(item => [candidateKey(item), item])).values());
     const recommendation = await recommendWithGemini(prompt, intent, uniqueCandidates);
-    res.json({ prompt, intent, query, candidates: uniqueCandidates.slice(0, 30), recommendation });
+    res.json({ prompt, intent, query, searchNeeds, candidates: uniqueCandidates.slice(0, 30), recommendation });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }

@@ -13,7 +13,7 @@
   "functions": {
     "api/index.ts": {
       "includeFiles": "server/templates/**",
-      "maxDuration": 30
+      "maxDuration": 60
     }
   }
 }
