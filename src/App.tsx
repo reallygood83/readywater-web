@@ -342,6 +342,12 @@ function App() {
       `- 남은 예산: ${formatWon(totals.remaining)}`,
       recommendation ? `- 추천 요약: ${recommendation.summary}` : '',
       recommendation ? `- 구성 전략: ${recommendation.strategy}` : '',
+      recommendation?.rationale.length ? '\n## 선정 근거' : '',
+      ...(recommendation?.rationale.map(item => `- ${item}`) || []),
+      recommendation?.activityIdeas.length ? '\n## 수업 활용 아이디어' : '',
+      ...(recommendation?.activityIdeas.map(item => `- ${item}`) || []),
+      recommendation?.purchaseNotes.length ? '\n## 구매 전 체크' : '',
+      ...(recommendation?.purchaseNotes.map(item => `- ${item}`) || []),
       '',
       '## 구매 목록',
       '',
@@ -644,6 +650,32 @@ function App() {
               <p className="recommendation-strategy">{recommendation.strategy}</p>
               <div className="coverage-list">
                 {recommendation.coverage.map(item => <span key={item}>{item}</span>)}
+              </div>
+              <div className="curation-grid">
+                {recommendation.rationale.length ? (
+                  <div className="curation-card">
+                    <strong>선정 근거</strong>
+                    <ul>
+                      {recommendation.rationale.map(item => <li key={item}>{item}</li>)}
+                    </ul>
+                  </div>
+                ) : null}
+                {recommendation.activityIdeas.length ? (
+                  <div className="curation-card">
+                    <strong>수업 활용 아이디어</strong>
+                    <ul>
+                      {recommendation.activityIdeas.map(item => <li key={item}>{item}</li>)}
+                    </ul>
+                  </div>
+                ) : null}
+                {recommendation.purchaseNotes.length ? (
+                  <div className="curation-card">
+                    <strong>구매 전 체크</strong>
+                    <ul>
+                      {recommendation.purchaseNotes.map(item => <li key={item}>{item}</li>)}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
               {recommendation.rejected.length ? (
                 <details className="rejected-list">

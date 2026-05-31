@@ -75,6 +75,9 @@ interface RecommendationResponse {
   parser: 'gemini' | 'rules';
   summary: string;
   strategy: string;
+  rationale: string[];
+  activityIdeas: string[];
+  purchaseNotes: string[];
   items: BudgetLine[];
   rejected: Array<{
     goods_seq: string;
@@ -100,6 +103,9 @@ interface EstimateExportItem {
 interface GeminiRecommendationResponse {
   summary?: string;
   strategy?: string;
+  rationale?: string[];
+  activityIdeas?: string[];
+  purchaseNotes?: string[];
   selected?: Array<{
     mall?: Product['mall'];
     goods_seq?: string;
@@ -251,6 +257,10 @@ function parseNumber(value: unknown): number {
   if (typeof value !== 'string') return 0;
   const cleaned = value.replace(/[^0-9.]/g, '');
   return cleaned ? Number(cleaned) || 0 : 0;
+}
+
+function formatServerWon(value: number): string {
+  return `${Math.round(value).toLocaleString('ko-KR')}원`;
 }
 
 function normalizePurchaseCount(value: unknown): number | undefined {
@@ -932,16 +942,19 @@ function sanitizeRecommendation(raw: unknown, candidates: Product[], prompt: str
     }];
   }).slice(0, 8);
 
-  return {
+  return enrichRecommendation({
     parser: 'gemini',
     summary: String(data.summary || `${intent.grade || ''} ${intent.purpose} 수업을 위한 구매안을 구성했습니다.`).trim(),
     strategy: String(data.strategy || '실제 검색 후보 안에서 수업 활용도, 반응 신호, 예산 균형을 함께 보았습니다.').trim(),
+    rationale: Array.isArray(data.rationale) ? data.rationale.map(String).filter(Boolean).slice(0, 5) : [],
+    activityIdeas: Array.isArray(data.activityIdeas) ? data.activityIdeas.map(String).filter(Boolean).slice(0, 5) : [],
+    purchaseNotes: Array.isArray(data.purchaseNotes) ? data.purchaseNotes.map(String).filter(Boolean).slice(0, 5) : [],
     items: selected,
     rejected,
     coverage: Array.isArray(data.coverage) ? data.coverage.map(String).filter(Boolean).slice(0, 8) : [],
     totalCost,
     remaining: intent.maxBudget - totalCost,
-  };
+  }, intent);
 }
 
 function maxUsefulQuantity(item: BudgetLine): number {
@@ -1015,13 +1028,15 @@ function fillRecommendationBudget(rec: RecommendationResponse, candidates: Produ
 
   const hasAmountInSummary = /총\s*예산|총액|잔액|[\d,]+\s*원/.test(next.summary);
   const coverage = next.coverage.length ? next.coverage.join(', ') : [...new Set(next.items.map(item => item.category || categoryForProduct(item)))].join(', ');
-  return {
+  return enrichRecommendation({
     ...next,
-    summary: hasAmountInSummary
-      ? `${intent.grade || ''} ${intent.purpose} 수업을 위해 ${coverage} 영역을 중심으로 실제 구매 가능한 상품만 선별했습니다.`.trim()
-      : next.summary,
+    summary: next.parser === 'rules'
+      ? ruleSummary(next.items, intent, next.totalCost)
+      : hasAmountInSummary
+      ? next.summary
+      : `${intent.grade || ''} ${intent.purpose} 수업을 위해 ${coverage} 영역을 중심으로 실제 구매 가능한 상품만 선별했습니다.`.trim(),
     strategy: `${next.strategy} 서버가 최종 단계에서 상품 ID, 가격, 구매 링크, 예산 초과 여부를 다시 검증했습니다.`,
-  };
+  }, intent);
 }
 
 function fallbackRecommendation(candidates: Product[], intent: ParsedPrompt): RecommendationResponse {
@@ -1062,10 +1077,13 @@ function fallbackRecommendation(candidates: Product[], intent: ParsedPrompt): Re
     });
   }
 
-  return {
+  return enrichRecommendation({
     parser: 'rules',
-    summary: `${intent.grade || ''} ${intent.purpose} 수업용으로 카테고리 균형을 맞춘 예산안을 구성했습니다.`.trim(),
-    strategy: '상품 후보를 구기/공간표시/팀구분/뉴스포츠/안전운영으로 나누고 예산 안에서 중복을 줄였습니다.',
+    summary: ruleSummary(selected, intent, totalCost),
+    strategy: ruleStrategy(selected, intent),
+    rationale: [],
+    activityIdeas: [],
+    purchaseNotes: [],
     items: selected,
     rejected: candidates
       .filter(item => !selected.some(line => candidateKey(line) === candidateKey(item)))
@@ -1074,7 +1092,94 @@ function fallbackRecommendation(candidates: Product[], intent: ParsedPrompt): Re
     coverage: [...new Set(selected.map(item => item.category || categoryForProduct(item)))],
     totalCost,
     remaining: intent.maxBudget - totalCost,
+  }, intent);
+}
+
+function categoryLabel(category: string): string {
+  const labels: Record<string, string> = {
+    구기던지기: '공 조작/던지기',
+    공간표시: '공간 표시/코스 구성',
+    팀구분: '팀 구분/협동 활동',
+    뉴스포츠: '뉴스포츠/전략 게임',
+    안전운영: '안전 운영/수업 관리',
+    기타: '보조 준비물',
   };
+  return labels[category] || category;
+}
+
+function categoryPurpose(category: string): string {
+  const purposes: Record<string, string> = {
+    구기던지기: '던지기, 받기, 피하기, 목표물 맞히기처럼 신체 조절과 게임 이해를 함께 다룰 수 있습니다.',
+    공간표시: '모둠별 활동 구역, 이동 동선, 출발선과 안전선을 빠르게 만들 수 있습니다.',
+    팀구분: '팀 편성과 역할 교대가 명확해져 대기 시간을 줄이고 협동 활동을 운영하기 쉽습니다.',
+    뉴스포츠: '기존 구기 종목보다 진입 장벽이 낮아 전략 수립, 의사소통, 페어플레이 지도가 쉽습니다.',
+    안전운영: '점수, 시간, 호루라기, 안전 신호 등 수업 운영 품질을 안정적으로 받쳐줍니다.',
+    기타: '주 활동을 보완하는 준비물로 반복 수업에서 활용 범위를 넓힐 수 있습니다.',
+  };
+  return purposes[category] || '수업 목표와 활동 흐름에 맞춰 보조 교구로 활용할 수 있습니다.';
+}
+
+function ruleSummary(items: BudgetLine[], intent: ParsedPrompt, totalCost: number): string {
+  const coverage = [...new Set(items.map(item => categoryLabel(item.category || categoryForProduct(item))))];
+  const mallCount = items.reduce<Record<string, number>>((acc, item) => {
+    acc[item.mall_name] = (acc[item.mall_name] || 0) + 1;
+    return acc;
+  }, {});
+  const mallText = Object.entries(mallCount).map(([mall, count]) => `${mall} ${count}종`).join(', ');
+  return `${intent.grade || ''} ${intent.purpose} 수업을 위해 ${coverage.join(', ')} 영역을 포함해 ${formatServerWon(totalCost)} 규모의 구매안을 구성했습니다. ${mallText ? `${mallText}을 함께 반영해 가격과 구매처를 비교할 수 있습니다.` : ''}`.trim();
+}
+
+function ruleStrategy(items: BudgetLine[], intent: ParsedPrompt): string {
+  const categories = [...new Set(items.map(item => item.category || categoryForProduct(item)))];
+  const categoryText = categories.map(category => `${categoryLabel(category)}는 ${categoryPurpose(category)}`).join(' ');
+  return `규칙 기반 큐레이션은 검색 후보를 수업 기능별로 분류한 뒤, ${formatServerWon(intent.maxBudget)} 예산 안에서 중복 품목을 줄이고 반복 사용성이 높은 교구를 우선했습니다. ${categoryText}`;
+}
+
+function enrichRecommendation(rec: RecommendationResponse, intent: ParsedPrompt): RecommendationResponse {
+  const categories = [...new Set(rec.items.map(item => item.category || categoryForProduct(item)))];
+  const totalQuantity = rec.items.reduce((sum, item) => sum + item.quantity, 0);
+  const mallSummary = rec.items.reduce<Record<string, number>>((acc, item) => {
+    acc[item.mall_name] = (acc[item.mall_name] || 0) + 1;
+    return acc;
+  }, {});
+  const mallText = Object.entries(mallSummary).map(([mall, count]) => `${mall} ${count}종`).join(', ');
+  const budgetRate = intent.maxBudget > 0 ? Math.round((rec.totalCost / intent.maxBudget) * 100) : 0;
+
+  const derivedRationale = [
+    `${categories.map(categoryLabel).join(', ')} 영역을 포함해 한 차시 활동과 단원 반복 활동을 모두 고려했습니다.`,
+    `${totalQuantity}개 단위로 구성되어 모둠 순환, 팀 경기, 전체 활동을 섞어 운영하기 좋습니다.`,
+    mallText ? `${mallText}을 함께 담아 특정 쇼핑몰에만 편중되지 않도록 했습니다.` : '',
+    `총액은 예산의 약 ${budgetRate}%이며, 남은 예산은 소모품 추가나 배송비 여유분으로 둘 수 있습니다.`,
+  ].filter(Boolean);
+
+  const derivedActivityIdeas = categories.slice(0, 5).map(category => {
+    const sample = rec.items.find(item => (item.category || categoryForProduct(item)) === category);
+    return `${categoryLabel(category)}: ${sample?.goods_name || '선정 교구'}를 활용해 ${categoryPurpose(category)}`;
+  });
+
+  const derivedPurchaseNotes = [
+    '구매 전 상품 상세 페이지에서 현재 판매 상태, 배송비, 학교장터 또는 카드 결제 가능 여부를 확인하세요.',
+    '학급 수, 모둠 수, 동시 활동 인원에 맞춰 수량을 조정하면 예산 낭비를 줄일 수 있습니다.',
+    '공이나 원마커처럼 반복 사용 교구는 보관함, 이름표, 분실 관리 방식을 함께 정해두는 것이 좋습니다.',
+  ];
+
+  return {
+    ...rec,
+    rationale: uniqueTextList(rec.parser === 'rules' ? derivedRationale : [...derivedRationale, ...rec.rationale]).slice(0, 5),
+    activityIdeas: uniqueTextList(rec.parser === 'rules' ? derivedActivityIdeas : [...derivedActivityIdeas, ...rec.activityIdeas]).slice(0, 5),
+    purchaseNotes: uniqueTextList(rec.parser === 'rules' ? derivedPurchaseNotes : [...derivedPurchaseNotes, ...rec.purchaseNotes]).slice(0, 5),
+    coverage: rec.coverage.length ? rec.coverage : categories,
+  };
+}
+
+function uniqueTextList(items: string[]): string[] {
+  const seen = new Set<string>();
+  return items.flatMap(item => {
+    const normalized = normalize(item);
+    if (!normalized || seen.has(normalized)) return [];
+    seen.add(normalized);
+    return [item];
+  });
 }
 
 async function recommendWithGemini(prompt: string, intent: ParsedPrompt, candidates: Product[]): Promise<RecommendationResponse> {
@@ -1133,6 +1238,9 @@ async function recommendWithGemini(prompt: string, intent: ParsedPrompt, candida
               '{',
               '  "summary": "교사용 구매안 한 문단",',
               '  "strategy": "왜 이 조합인지",',
+              '  "rationale": ["선정 근거 1", "선정 근거 2"],',
+              '  "activityIdeas": ["수업 활용 아이디어 1", "수업 활용 아이디어 2"],',
+              '  "purchaseNotes": ["구매 전 확인 사항 1", "구매 전 확인 사항 2"],',
               '  "coverage": ["구기던지기", "공간표시"],',
               '  "selected": [',
               '    { "mall": "teachermall", "goods_seq": "123", "quantity": 4, "category": "구기던지기", "reason": "선정 이유", "activities": ["활동1"], "risks": ["확인사항"] }',

@@ -508,6 +508,40 @@ select:focus {
   font-weight: 800;
 }
 
+.curation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.curation-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d4ebe7;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.curation-card strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #0b756a;
+  font-size: 13px;
+}
+
+.curation-card ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: #405164;
+  font-size: 13px;
+}
+
+.curation-card li {
+  padding-left: 2px;
+}
+
 .rejected-list {
   padding-top: 6px;
   color: #56687a;
@@ -1446,6 +1480,10 @@ h1 {
     justify-content: flex-start;
     max-width: none;
     margin-top: 12px;
+  }
+
+  .curation-grid {
+    grid-template-columns: 1fr;
   }
 
   .product-grid {

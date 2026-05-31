@@ -44,6 +44,9 @@ export interface RecommendationResponse {
   parser: 'gemini' | 'rules';
   summary: string;
   strategy: string;
+  rationale: string[];
+  activityIdeas: string[];
+  purchaseNotes: string[];
   items: BudgetLine[];
   rejected: Array<{
     goods_seq: string;
