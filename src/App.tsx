@@ -5,6 +5,7 @@ import {
   Download,
   ExternalLink,
   FileSpreadsheet,
+  List,
   Lock,
   Loader2,
   Lightbulb,
@@ -58,6 +59,32 @@ function signalText(product: Product) {
   return signals.length ? signals.join(' · ') : '반응 데이터 확인 중';
 }
 
+function productTags(product: Product) {
+  const text = [product.goods_name, product.category_path || '', product.properties || ''].join(' ');
+  const tags = new Set<string>();
+  if (/체육|스포츠|운동|놀이체육/.test(text)) tags.add('체육');
+  if (/피구|공\b|스펀지|솜털|빈백/.test(text)) tags.add('구기');
+  if (/안전|소프트|말랑/.test(text)) tags.add('안전');
+  if (/협동|팀|조끼/.test(text)) tags.add('협동');
+  if (/뉴스포츠|스파이크볼|피클볼|디스크/.test(text)) tags.add('뉴스포츠');
+  if (/기록|타이머|점수|스코어/.test(text)) tags.add('기록');
+  if (/순발력|민첩|사다리/.test(text)) tags.add('훈련');
+  return Array.from(tags).slice(0, 3);
+}
+
+function popularityValue(product: Product) {
+  return product.purchase_count || product.wish_count || product.review_count || 0;
+}
+
+function compactNumber(value: number) {
+  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}k`;
+  return value.toLocaleString('ko-KR');
+}
+
+function isSoldOut(product: Product) {
+  return /sold|out|품절|판매종료|일시품절/i.test([product.sale_status || '', product.properties || ''].join(' '));
+}
+
 function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [authEnabled, setAuthEnabled] = useState(false);
@@ -79,6 +106,8 @@ function App() {
   const [loadingMode, setLoadingMode] = useState<'search' | 'budget' | 'prompt' | null>(null);
   const [status, setStatus] = useState('조건을 입력하고 검색을 시작하세요.');
   const [activeTab, setActiveTab] = useState<'search' | 'budget'>('search');
+  const [resultView, setResultView] = useState<'table' | 'card'>('table');
+  const [hideSoldOut, setHideSoldOut] = useState(false);
 
   const modalSteps = loadingMode === 'prompt'
     ? loadingSteps
@@ -93,6 +122,20 @@ function App() {
       remaining: budget - selectedTotal,
     };
   }, [budget, selected]);
+
+  const stockFilteredResults = useMemo(() => (
+    hideSoldOut ? results.filter(product => !isSoldOut(product)) : results
+  ), [hideSoldOut, results]);
+
+  const visibleResults = useMemo(() => (
+    source === 'all' ? stockFilteredResults : stockFilteredResults.filter(product => product.mall === source)
+  ), [source, stockFilteredResults]);
+
+  const resultCounts = useMemo(() => ({
+    all: stockFilteredResults.length,
+    teachermall: stockFilteredResults.filter(product => product.mall === 'teachermall').length,
+    iscream: stockFilteredResults.filter(product => product.mall === 'iscream').length,
+  }), [stockFilteredResults]);
 
   useEffect(() => {
     async function checkAuth() {
@@ -266,6 +309,21 @@ function App() {
         return current.map(item => item === found ? { ...item, quantity: item.quantity + 1 } : item);
       }
       return [...current, { ...product, quantity: 1, useCase: `${purpose} 수업 활동에 활용` }];
+    });
+  }
+
+  function quantityForProduct(product: Product) {
+    return selected.find(item => item.mall === product.mall && item.goods_seq === product.goods_seq)?.quantity || 0;
+  }
+
+  function setProductQuantity(product: Product, quantity: number) {
+    setSelected(current => {
+      const found = current.find(item => item.mall === product.mall && item.goods_seq === product.goods_seq);
+      if (!found && quantity <= 0) return current;
+      if (!found) return [...current, { ...product, quantity, useCase: `${purpose} 수업 활동에 활용` }];
+      return current
+        .map(item => item === found ? { ...item, quantity } : item)
+        .filter(item => item.quantity > 0);
     });
   }
 
@@ -600,31 +658,117 @@ function App() {
             </section>
           ) : null}
 
-          <div className="product-grid">
-            {results.map(product => (
-              <article className="product-card" key={`${product.mall}:${product.goods_seq}`}>
-                <img src={product.image_url || '/placeholder.svg'} alt="" />
-                <div className="product-body">
-                  <div className="product-meta">
-                    <span className={`mall-badge ${mallClass(product.mall)}`}>{product.mall_name}</span>
-                    <span>{product.provider_name || '판매처 확인'}</span>
-                  </div>
-                  <h2>{product.goods_name}</h2>
-                  <div className="price-row">
-                    <strong>{formatWon(product.price)}</strong>
-                    {product.discount_rate ? <span>{product.discount_rate}%</span> : null}
-                  </div>
-                  <p>{signalText(product)}</p>
-                  <div className="card-actions">
-                    <button onClick={() => addProduct(product)}>담기</button>
-                    <a href={product.shop_url} target="_blank" rel="noreferrer">
-                      구매 <ExternalLink size={14} />
-                    </a>
-                  </div>
-                </div>
-              </article>
-            ))}
+          <div className="results-header">
+            <div>
+              <strong>검색 결과</strong>
+              <span>총 {visibleResults.length}개 상품</span>
+            </div>
+            <div className="result-tools">
+              <label className="stock-toggle">
+                <input type="checkbox" checked={hideSoldOut} onChange={event => setHideSoldOut(event.target.checked)} />
+                품절 제외
+              </label>
+              <div className="view-toggle" aria-label="결과 보기 방식">
+                <button className={resultView === 'table' ? 'active' : ''} onClick={() => setResultView('table')}>
+                  <List size={16} />
+                  표 보기
+                </button>
+                <button className={resultView === 'card' ? 'active' : ''} onClick={() => setResultView('card')}>
+                  카드 보기
+                </button>
+              </div>
+              <select value={sort} onChange={event => setSort(event.target.value as SortOption)} aria-label="결과 정렬">
+                {sortOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
           </div>
+
+          <div className="result-pills">
+            <button className={source === 'all' ? 'active' : ''} onClick={() => setSource('all')}>전체({resultCounts.all})</button>
+            <button className={source === 'teachermall' ? 'active teachermall' : 'teachermall'} onClick={() => setSource('teachermall')}>티처몰({resultCounts.teachermall})</button>
+            <button className={source === 'iscream' ? 'active iscream' : 'iscream'} onClick={() => setSource('iscream')}>아이스크림몰({resultCounts.iscream})</button>
+          </div>
+
+          {resultView === 'table' ? (
+            <div className="product-table" role="table" aria-label="상품 검색 결과 표">
+              <div className="product-table-head" role="row">
+                <span>쇼핑몰</span>
+                <span>상품 정보</span>
+                <span>가격</span>
+                <span>인기도</span>
+                <span>평점</span>
+                <span>구매</span>
+                <span>수량</span>
+              </div>
+              {visibleResults.map(product => {
+                const quantity = quantityForProduct(product);
+                const popularity = popularityValue(product);
+                return (
+                  <article className="product-row" key={`${product.mall}:${product.goods_seq}`} role="row">
+                    <div className="mall-cell">
+                      <span className={`mall-icon ${mallClass(product.mall)}`}>{product.mall === 'teachermall' ? 'T' : 'i'}</span>
+                      <strong>{product.mall_name}</strong>
+                    </div>
+                    <div className="info-cell">
+                      <img src={product.image_url || '/placeholder.svg'} alt="" />
+                      <div>
+                        <h2>{product.goods_name}</h2>
+                        <div className="tag-row">
+                          {productTags(product).map(tag => <span key={tag}>{tag}</span>)}
+                          {product.discount_rate ? <span>{product.discount_rate}% 할인</span> : null}
+                        </div>
+                        <p>{product.provider_name || product.category_path || `${purpose} 수업 활동에 활용`}</p>
+                      </div>
+                    </div>
+                    <div className="table-price">{formatWon(product.price)}</div>
+                    <div className="signal-cell">
+                      <strong>{popularity ? compactNumber(popularity) : '-'}</strong>
+                      <span>{popularity ? '반응 신호' : '확인 중'}</span>
+                      {popularity ? <em>인기</em> : null}
+                    </div>
+                    <div className="rating-cell">
+                      <strong>{product.average_rating ? product.average_rating.toFixed(1) : '-'}</strong>
+                      <span>{product.review_count ? `(${product.review_count.toLocaleString('ko-KR')})` : ''}</span>
+                    </div>
+                    <a className="buy-button" href={product.shop_url} target="_blank" rel="noreferrer">
+                      구매하기 <ExternalLink size={14} />
+                    </a>
+                    <div className="quantity-stepper">
+                      <button onClick={() => setProductQuantity(product, Math.max(0, quantity - 1))}>-</button>
+                      <span>{quantity}</span>
+                      <button onClick={() => setProductQuantity(product, quantity + 1)}>+</button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="product-grid">
+              {visibleResults.map(product => (
+                <article className="product-card" key={`${product.mall}:${product.goods_seq}`}>
+                  <img src={product.image_url || '/placeholder.svg'} alt="" />
+                  <div className="product-body">
+                    <div className="product-meta">
+                      <span className={`mall-badge ${mallClass(product.mall)}`}>{product.mall_name}</span>
+                      <span>{product.provider_name || '판매처 확인'}</span>
+                    </div>
+                    <h2>{product.goods_name}</h2>
+                    <div className="price-row">
+                      <strong>{formatWon(product.price)}</strong>
+                      {product.discount_rate ? <span>{product.discount_rate}%</span> : null}
+                    </div>
+                    <p>{signalText(product)}</p>
+                    <div className="card-actions">
+                      <button onClick={() => addProduct(product)}>담기</button>
+                      <a href={product.shop_url} target="_blank" rel="noreferrer">
+                        구매 <ExternalLink size={14} />
+                      </a>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
 
           <div className="insight-grid">
             <section className="insight-card">
