@@ -697,7 +697,7 @@ function App() {
                 <span>가격</span>
                 <span>인기도</span>
                 <span>평점</span>
-                <span>구매</span>
+                <span>구매 링크</span>
                 <span>수량</span>
               </div>
               {visibleResults.map(product => {
@@ -730,8 +730,8 @@ function App() {
                       <strong>{product.average_rating ? product.average_rating.toFixed(1) : '-'}</strong>
                       <span>{product.review_count ? `(${product.review_count.toLocaleString('ko-KR')})` : ''}</span>
                     </div>
-                    <a className="buy-button" href={product.shop_url} target="_blank" rel="noreferrer">
-                      구매하기 <ExternalLink size={14} />
+                    <a className="buy-button" href={product.shop_url} target="_blank" rel="noreferrer" aria-label={`${product.goods_name} 구매 링크 열기`}>
+                      구매 링크 <ExternalLink size={14} />
                     </a>
                     <div className="quantity-stepper">
                       <button onClick={() => setProductQuantity(product, Math.max(0, quantity - 1))}>-</button>
