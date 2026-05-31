@@ -4,7 +4,7 @@ import {
   BookOpenCheck,
   Download,
   ExternalLink,
-  FileText,
+  FileSpreadsheet,
   Loader2,
   Lightbulb,
   ShieldCheck,
@@ -71,7 +71,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [loadingMode, setLoadingMode] = useState<'search' | 'budget' | 'prompt' | null>(null);
   const [status, setStatus] = useState('조건을 입력하고 검색을 시작하세요.');
-  const [activeTab, setActiveTab] = useState<'search' | 'budget' | 'report'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'budget'>('search');
 
   const modalSteps = loadingMode === 'prompt'
     ? loadingSteps
@@ -367,9 +367,6 @@ function App() {
           <button className={activeTab === 'budget' ? 'active' : ''} onClick={() => setActiveTab('budget')}>
             <ShoppingCart size={16} /> 예산구성
           </button>
-          <button className={activeTab === 'report' ? 'active' : ''} onClick={() => setActiveTab('report')}>
-            <FileText size={16} /> 리포트
-          </button>
         </nav>
       </header>
 
@@ -633,7 +630,7 @@ function App() {
 
           <div className="export-actions">
             <button onClick={downloadMarkdown}><Download size={16} /> Markdown</button>
-            <button onClick={() => void downloadEstimate('xlsx')}><FileText size={16} /> Excel</button>
+            <button onClick={() => void downloadEstimate('xlsx')}><FileSpreadsheet size={16} /> Excel</button>
             <button onClick={() => void downloadEstimate('csv')}><Download size={16} /> CSV</button>
           </div>
         </aside>
