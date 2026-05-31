@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   BarChart3,
   BookOpenCheck,
@@ -34,8 +34,6 @@ const sortOptions: Array<{ value: SortOption; label: string }> = [
 
 const seedNeeds = ['피구공', '원마커', '팀조끼', '라바콘', '플라잉디스크'];
 
-const promptPlaceholder = '예: 6학년 체육교육에 100만원 예산으로 반응 좋은 교구를 추천하고 구매 링크까지 알려줘';
-
 const loadingSteps = [
   '자연어 요청 해석',
   '티처몰 상품 후보 검색',
@@ -64,7 +62,7 @@ function App() {
   const [budget, setBudget] = useState(1_000_000);
   const [source, setSource] = useState<MallSource>('all');
   const [sort, setSort] = useState<SortOption>('relevance');
-  const [query, setQuery] = useState('6학년 체육 교구');
+  const [query, setQuery] = useState('');
   const [results, setResults] = useState<Product[]>([]);
   const [kit, setKit] = useState<BudgetKitResponse | null>(null);
   const [recommendation, setRecommendation] = useState<RecommendationResponse | null>(null);
@@ -90,12 +88,13 @@ function App() {
   }, [budget, selected]);
 
   async function runSearch(nextQuery = query) {
+    const searchQuery = nextQuery.trim() || [grade, purpose, '교구'].filter(Boolean).join(' ');
     setLoading(true);
     setLoadingMode('search');
     setStatus('두 몰의 상품 데이터를 검색하고 있습니다.');
     try {
       const params = new URLSearchParams({
-        query: nextQuery,
+        query: searchQuery,
         source,
         sort,
         limit: '18',
@@ -256,11 +255,6 @@ function App() {
     URL.revokeObjectURL(url);
   }
 
-  useEffect(() => {
-    void runSearch('6학년 체육 교구');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const mallCounts = useMemo(() => selected.reduce<Record<string, number>>((acc, item) => {
     acc[item.mall_name] = (acc[item.mall_name] || 0) + 1;
     return acc;
@@ -389,10 +383,24 @@ function App() {
           <label>
             학년
             <select value={grade} onChange={event => setGrade(event.target.value)}>
-              <option>3학년</option>
-              <option>4학년</option>
-              <option>5학년</option>
-              <option>6학년</option>
+              <optgroup label="초등">
+                <option>초등 1학년</option>
+                <option>초등 2학년</option>
+                <option>초등 3학년</option>
+                <option>초등 4학년</option>
+                <option>초등 5학년</option>
+                <option>6학년</option>
+              </optgroup>
+              <optgroup label="중등">
+                <option>중등 1학년</option>
+                <option>중등 2학년</option>
+                <option>중등 3학년</option>
+              </optgroup>
+              <optgroup label="고등">
+                <option>고등 1학년</option>
+                <option>고등 2학년</option>
+                <option>고등 3학년</option>
+              </optgroup>
               <option>전학년</option>
             </select>
           </label>
@@ -449,10 +457,10 @@ function App() {
               <span>자연어 AI 검색</span>
             </div>
             <textarea
+              aria-label="자연어 검색"
               value={naturalPrompt}
               onChange={event => setNaturalPrompt(event.target.value)}
               rows={2}
-              placeholder={promptPlaceholder}
             />
             <button onClick={() => void runNaturalPrompt()} disabled={loading}>
               {loading ? <Loader2 className="spin" size={17} /> : <Wand2 size={17} />}
